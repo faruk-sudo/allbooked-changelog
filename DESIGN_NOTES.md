@@ -41,3 +41,22 @@ v1 route reads only `published` posts.
 - `whats_new_killswitch_blocked`
 
 No PII payloads should be added when instrumentation is implemented.
+
+## Design system foundation
+
+### Context
+
+The repository was empty at implementation time, so no existing UI stack, styling toolchain, or component conventions could be inferred.
+
+### Decisions
+
+1. Use plain CSS + React-compatible TSX primitives with zero new runtime dependencies.
+2. Keep `tokens.json` as the single source of truth and generate `src/styles/tokens.css` via a small Node script.
+3. Include both light and dark semantic modes with `:root` and `[data-theme="dark"]`.
+4. Keep primitives intentionally small (`Text`, `Button`, `Surface`, `Stack`) and rely on semantic CSS variables only.
+5. Add a smoke component (`src/pages/DesignSystemSmoke.tsx`) instead of introducing router/framework-specific wiring.
+
+### Tradeoffs
+
+- Chose a hand-rolled generator over an external token package to avoid dependency overhead while preserving a clear upgrade path.
+- Primitive components are framework-agnostic enough for most React builds but not tied to any one app entrypoint because no existing app structure was present.
