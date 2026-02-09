@@ -60,3 +60,21 @@ The repository was empty at implementation time, so no existing UI stack, stylin
 
 - Chose a hand-rolled generator over an external token package to avoid dependency overhead while preserving a clear upgrade path.
 - Primitive components are framework-agnostic enough for most React builds but not tied to any one app entrypoint because no existing app structure was present.
+
+## Phase 1.1 DB schema (What's New)
+
+### Decisions
+
+1. Use PostgreSQL with SQL-first migrations and a minimal custom runner (`db/migrations` + `scripts/db/*`) to keep dependencies low while still supporting deterministic up/down execution.
+2. Keep slugs globally unique in v1 to simplify future public URL exposure.
+3. Enforce secure defaults in schema:
+   - `status` default is `draft`
+   - `visibility` default is `authenticated`
+   - actor references are internal IDs only (no email fields)
+4. Add a schema-level metadata redaction check on `changelog_audit_log` to block `body_markdown` keys from being persisted.
+5. Preserve tenant-scoping primitives in every durable table (`tenant_id` on posts/read_state/audit rows) to support clean multi-tenant isolation in query and access layers.
+
+### Retention and forward-looking notes
+
+- Audit logs are append-oriented and should be retained according to compliance policy (exact retention window to be set with security/legal before production rollout).
+- `visibility='public'` is modelled now for forward compatibility, but v1 behavior should continue to serve authenticated/admin-only content until explicitly enabled.

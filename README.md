@@ -10,6 +10,7 @@ Secure foundation for AllBooked's in-app admin-only "What's New" (changelog) fea
 ## Stack
 - Node.js + TypeScript
 - Express (small, portable integration surface)
+- PostgreSQL + SQL migrations (lightweight custom runner)
 - `markdown-it` + `sanitize-html` for strict markdown rendering
 - Vitest + Supertest for unit/smoke-ish route tests
 
@@ -49,6 +50,9 @@ curl -i http://localhost:3000/whats-new \
 - `WHATS_NEW_KILL_SWITCH`: `true|false`; when `true`, blocks all tenants
 - `WHATS_NEW_ALLOWLIST_ENABLED`: `true|false`; when `false`, any tenant with context is allowed
 - `WHATS_NEW_ALLOWLIST_TENANT_IDS`: comma-separated tenant IDs (e.g. `tenant-alpha,tenant-beta`)
+- `DATABASE_URL`: PostgreSQL connection string for migrations/seeding/smoke checks
+- `DATABASE_SSL`: `true|false` (default `false`) for DB TLS
+- `DATABASE_SSL_REJECT_UNAUTHORIZED`: `true|false` (default `true`) when TLS is enabled
 
 ## Security defaults included
 - Admin-only access enforced server-side on `/whats-new` routes
@@ -59,8 +63,40 @@ curl -i http://localhost:3000/whats-new \
 - Logging intentionally avoids markdown/body content
 - CSRF middleware scaffolded for future mutating admin endpoints
 
-## Seed/mock data
-Published and draft mock posts live in `src/changelog/repository.ts` and are clearly marked as seeded data.
+## Database setup and migrations
+1. Start PostgreSQL locally and ensure `DATABASE_URL` points to an existing database.
+2. Run schema migrations:
+```bash
+npm run db:migrate
+```
+3. (Optional, dev-only) seed sample published changelog posts:
+```bash
+npm run db:seed:dev
+```
+4. (Optional) roll back most recent migration:
+```bash
+npm run db:migrate:down
+```
+5. (Optional) roll back multiple migrations:
+```bash
+npm run db:migrate:down -- 2
+```
+
+Migration files live in `db/migrations`.
+
+## DB smoke check
+Run constraint-level verification against a local Postgres instance:
+```bash
+npm run db:smoke
+```
+
+The smoke check verifies:
+- post title is required
+- post slug uniqueness is enforced
+- read-state uniqueness on `(tenant_id, user_id)` is enforced
+
+## Current app data source
+Published and draft mock posts still live in `src/changelog/repository.ts`. DB-backed read/write endpoints are intentionally out of scope for this phase.
 
 ## Tests
 Run unit tests:
