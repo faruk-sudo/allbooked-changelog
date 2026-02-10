@@ -164,6 +164,46 @@ describe("What's New read API", () => {
     expect(response.body.safe_html).not.toMatch(/href\s*=\s*"\s*javascript:/i);
   });
 
+  it("returns 404 on detail endpoint when slug is missing, draft, or outside tenant scope", async () => {
+    const repo = new InMemoryChangelogRepository([
+      {
+        id: "1",
+        tenantId: "tenant-beta",
+        visibility: "authenticated",
+        status: "published",
+        category: "new",
+        title: "Tenant Beta",
+        slug: "tenant-beta-post",
+        bodyMarkdown: "Beta body",
+        publishedAt: "2026-02-01T00:00:00.000Z",
+        revision: 1
+      },
+      {
+        id: "2",
+        tenantId: null,
+        visibility: "authenticated",
+        status: "draft",
+        category: "new",
+        title: "Draft",
+        slug: "draft-post",
+        bodyMarkdown: "Draft body",
+        publishedAt: null,
+        revision: 1
+      }
+    ]);
+
+    const app = createApp(createConfig(), { changelogRepository: repo });
+
+    const missingResponse = await withAdminHeaders(request(app).get("/api/whats-new/posts/missing-post"));
+    expect(missingResponse.status).toBe(404);
+
+    const otherTenantResponse = await withAdminHeaders(request(app).get("/api/whats-new/posts/tenant-beta-post"));
+    expect(otherTenantResponse.status).toBe(404);
+
+    const draftResponse = await withAdminHeaders(request(app).get("/api/whats-new/posts/draft-post"));
+    expect(draftResponse.status).toBe(404);
+  });
+
   it("returns unread=true when published posts exist and no read state is present", async () => {
     const repo = new InMemoryChangelogRepository([
       {

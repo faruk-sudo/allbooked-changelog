@@ -89,6 +89,45 @@ describe("GET /whats-new", () => {
     expect(response.text).toContain("What's New");
   });
 
+  it("renders canonical detail page with metadata and sanitized markdown", async () => {
+    const app = createApp(config, {
+      changelogRepository: new InMemoryChangelogRepository([
+        {
+          id: "1",
+          tenantId: null,
+          visibility: "authenticated",
+          status: "published",
+          category: "fix",
+          title: "Sanitized detail",
+          slug: "sanitized-detail",
+          bodyMarkdown:
+            "<script>alert(1)</script>\n<img src=x onerror=alert(1)>\n[good](https://example.com)\n[bad](javascript:alert(2))\n**safe**",
+          publishedAt: "2026-02-01T00:00:00.000Z",
+          revision: 1
+        }
+      ])
+    });
+
+    const response = await request(app)
+      .get("/whats-new/sanitized-detail")
+      .set("x-user-id", "admin-1")
+      .set("x-user-role", "ADMIN")
+      .set("x-tenant-id", "tenant-alpha");
+
+    expect(response.status).toBe(200);
+    expect(response.text).toContain("Back to What's New");
+    expect(response.text).toContain('wn-category-badge--fix');
+    expect(response.text).toContain('<time datetime="2026-02-01T00:00:00.000Z">');
+    expect(response.text).toContain("<strong>safe</strong>");
+    expect(response.text).toContain('href="https://example.com"');
+    expect(response.text).toContain('target="_blank"');
+    expect(response.text).toContain('rel="noopener noreferrer"');
+    expect(response.text).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");
+    expect(response.text).not.toContain("<script>alert(1)</script>");
+    expect(response.text).not.toMatch(/<[^>]+\son(?:error|load)\s*=/i);
+    expect(response.text).not.toMatch(/href\s*=\s*"\s*javascript:/i);
+  });
+
   it("renders drawer entry with unread dot on detail route when unread updates exist", async () => {
     const app = createApp(config, {
       changelogRepository: new InMemoryChangelogRepository([
@@ -159,8 +198,75 @@ describe("GET /whats-new", () => {
     expect(response.text).toContain('id="whats-new-unread-dot" class="wn-nav-badge-dot" hidden');
   });
 
+  it("returns 404 for unknown or gated detail slugs", async () => {
+    const app = createApp(config, {
+      changelogRepository: new InMemoryChangelogRepository([
+        {
+          id: "1",
+          tenantId: "tenant-beta",
+          visibility: "authenticated",
+          status: "published",
+          category: "new",
+          title: "Tenant Beta only",
+          slug: "tenant-beta-only",
+          bodyMarkdown: "Body",
+          publishedAt: "2026-02-01T00:00:00.000Z",
+          revision: 1
+        },
+        {
+          id: "2",
+          tenantId: null,
+          visibility: "authenticated",
+          status: "draft",
+          category: "new",
+          title: "Draft post",
+          slug: "draft-post",
+          bodyMarkdown: "Body",
+          publishedAt: null,
+          revision: 1
+        }
+      ])
+    });
+
+    const unknownResponse = await request(app)
+      .get("/whats-new/not-a-post")
+      .set("x-user-id", "admin-1")
+      .set("x-user-role", "ADMIN")
+      .set("x-tenant-id", "tenant-alpha");
+    expect(unknownResponse.status).toBe(404);
+
+    const tenantGatedResponse = await request(app)
+      .get("/whats-new/tenant-beta-only")
+      .set("x-user-id", "admin-1")
+      .set("x-user-role", "ADMIN")
+      .set("x-tenant-id", "tenant-alpha");
+    expect(tenantGatedResponse.status).toBe(404);
+
+    const draftResponse = await request(app)
+      .get("/whats-new/draft-post")
+      .set("x-user-id", "admin-1")
+      .set("x-user-role", "ADMIN")
+      .set("x-tenant-id", "tenant-alpha");
+    expect(draftResponse.status).toBe(404);
+  });
+
   it("renders whats new side panel markup with dialog semantics on detail route", async () => {
-    const app = createApp(config);
+    const app = createApp(config, {
+      changelogRepository: new InMemoryChangelogRepository([
+        {
+          id: "1",
+          tenantId: null,
+          visibility: "authenticated",
+          status: "published",
+          category: "new",
+          title: "Example post",
+          slug: "example-post",
+          bodyMarkdown: "Body",
+          publishedAt: "2026-02-01T00:00:00.000Z",
+          revision: 1
+        }
+      ])
+    });
     const response = await request(app)
       .get("/whats-new/example-post")
       .set("x-user-id", "admin-1")

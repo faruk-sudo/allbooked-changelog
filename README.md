@@ -31,6 +31,7 @@ npm run dev
 - Root (redirects): `http://localhost:3000/`
 - Health: `http://localhost:3000/healthz`
 - What's New: `http://localhost:3000/whats-new`
+- What's New detail: `http://localhost:3000/whats-new/:slug`
 
 ## Required request headers (stub auth/tenant context)
 The current implementation uses headers as an auth/tenant stub until real SSO is integrated.
@@ -128,7 +129,8 @@ Audit log behavior:
 
 ## Current app data source
 - `src/server.ts` uses Postgres-backed changelog repository (`changelog_posts`, `changelog_audit_log`, `changelog_read_state`).
-- `/whats-new` page route now fetches from `GET /api/whats-new/posts` and `GET /api/whats-new/posts/:slug`.
+- `/whats-new` renders the list feed client-side from `GET /api/whats-new/posts`.
+- `/whats-new/:slug` resolves on the server, enforces published/authenticated + tenant scope, and renders markdown through the shared sanitization pipeline.
 
 ## Tests
 Run unit tests:

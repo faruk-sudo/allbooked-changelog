@@ -3,9 +3,10 @@ import { resolve } from "node:path";
 import { Router, type Request, type Response } from "express";
 import type { AppConfig } from "../config";
 import { appLogger, type Logger } from "../security/logger";
+import { renderMarkdownSafe } from "../security/markdown";
 import { getGuardedWhatsNewContext } from "./authz";
 import { applyWhatsNewReadGuards } from "./guards";
-import type { ChangelogRepository } from "./repository";
+import { sanitizeSlugOrThrow, type ChangelogPostCategory, type ChangelogRepository } from "./repository";
 import type { WhatsNewRequestContext } from "./request-context";
 
 const STYLESHEET = [
@@ -41,14 +42,13 @@ const CLIENT_SCRIPT = `(() => {
   };
   const csrfToken = appRoot.dataset.csrfToken || "csrf-token-123456";
 
-  const statusEl = document.getElementById("whats-new-status");
   const unreadLinkEl = document.getElementById("whats-new-entry-link");
   const unreadDotEl = document.getElementById("whats-new-unread-dot");
   const unreadTextEl = document.getElementById("whats-new-unread-text");
   const overlayEl = document.getElementById("whats-new-panel-overlay");
   const panelEl = document.getElementById("whats-new-panel");
   const panelCloseEl = document.getElementById("whats-new-panel-close");
-  const panelStatusEl = document.getElementById("whats-new-panel-status") || statusEl;
+  const panelStatusEl = document.getElementById("whats-new-panel-status");
   const feedListEl = document.getElementById("whats-new-feed-list");
   const loadingEl = document.getElementById("whats-new-feed-loading");
   const emptyEl = document.getElementById("whats-new-feed-empty");
@@ -76,13 +76,6 @@ const CLIENT_SCRIPT = `(() => {
       "aria-label",
       hasUnread ? "What's New. New updates available" : "What's New"
     );
-  };
-
-  const setStatus = (message) => {
-    if (!statusEl) {
-      return;
-    }
-    statusEl.textContent = message;
   };
 
   const setPanelStatus = (message) => {
@@ -325,22 +318,6 @@ const CLIENT_SCRIPT = `(() => {
     }
   };
 
-  const renderDetail = async () => {
-    const detailEl = document.getElementById("whats-new-detail");
-    const titleEl = document.getElementById("whats-new-title");
-    if (!detailEl || !titleEl) {
-      return;
-    }
-
-    const slug = appRoot.dataset.slug || "";
-    setStatus("Loading post...");
-
-    const payload = await requestJson("/api/whats-new/posts/" + encodeURIComponent(slug));
-    titleEl.textContent = payload.title;
-    detailEl.innerHTML = payload.safe_html;
-    setStatus("");
-  };
-
   const refreshUnreadIndicator = async () => {
     try {
       const payload = await requestJson("/api/whats-new/unread");
@@ -546,14 +523,6 @@ const CLIENT_SCRIPT = `(() => {
     const loadFeedOnListPromise =
       appRoot.dataset.view === "list" ? loadFeedPage("initial") : Promise.resolve();
 
-    try {
-      if (appRoot.dataset.view === "detail") {
-        await renderDetail();
-      }
-    } catch {
-      setStatus("Unable to load What's New content.");
-    }
-
     await unreadRefreshPromise;
     await markSeenOnListPromise;
     await loadFeedOnListPromise;
@@ -651,6 +620,39 @@ function renderWhatsNewPanel(): string {
     </aside>`;
 }
 
+interface CategoryPresentation {
+  tone: ChangelogPostCategory;
+  label: string;
+}
+
+interface DetailPagePost {
+  title: string;
+  category: ChangelogPostCategory;
+  publishedAt: string;
+  safeHtml: string;
+}
+
+function getCategoryPresentation(category: ChangelogPostCategory): CategoryPresentation {
+  if (category === "improvement") {
+    return { tone: "improvement", label: "Improvement" };
+  }
+
+  if (category === "fix") {
+    return { tone: "fix", label: "Fix" };
+  }
+
+  return { tone: "new", label: "New" };
+}
+
+function formatPublishedDate(isoValue: string): string {
+  const parsed = new Date(isoValue);
+  if (Number.isNaN(parsed.valueOf())) {
+    return isoValue;
+  }
+
+  return new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeZone: "UTC" }).format(parsed);
+}
+
 function renderListPage(context: WhatsNewRequestContext, hasUnread: boolean): string {
   return `<!doctype html>
 <html lang="en">
@@ -690,28 +692,38 @@ function renderListPage(context: WhatsNewRequestContext, hasUnread: boolean): st
 </html>`;
 }
 
-function renderDetailPage(context: WhatsNewRequestContext, slug: string, hasUnread: boolean): string {
+function renderDetailPage(context: WhatsNewRequestContext, post: DetailPagePost, hasUnread: boolean): string {
+  const category = getCategoryPresentation(post.category);
+
   return `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>What's New</title>
+    <title>${escapeHtml(post.title)} · What's New</title>
     <link rel="stylesheet" href="/whats-new/assets/styles.css" />
   </head>
   <body class="ds-root wn-page">
-    <main class="wn-main">
-      <nav><a class="wn-back-link" href="/whats-new">Back</a></nav>
-      <h1 id="whats-new-title" class="ds-text ds-text--heading">Loading…</h1>
-      <p id="whats-new-status" aria-live="polite"></p>
-      <article id="whats-new-detail" class="wn-detail"></article>
+    <main class="wn-main wn-main--detail">
+      <nav class="wn-detail-nav">
+        <a class="wn-back-link" href="/whats-new">Back to What's New</a>
+      </nav>
+      <article class="wn-detail-shell ds-surface ds-surface--raised" aria-labelledby="whats-new-title">
+        <header class="wn-detail-header ds-stack ds-stack--vertical">
+          <span class="wn-category-badge wn-category-badge--${category.tone}">${category.label}</span>
+          <h1 id="whats-new-title" class="ds-text ds-text--heading">${escapeHtml(post.title)}</h1>
+          <p class="wn-detail-meta ds-text ds-text--muted">
+            <time datetime="${escapeHtml(post.publishedAt)}">${escapeHtml(formatPublishedDate(post.publishedAt))}</time>
+          </p>
+        </header>
+        <div id="whats-new-detail" class="wn-detail">${post.safeHtml}</div>
+      </article>
     </main>
     ${renderWhatsNewPanel()}
     ${renderBottomBar(hasUnread)}
     <div
       id="whats-new-app"
       data-view="detail"
-      data-slug="${escapeHtml(slug)}"
       data-user-id="${escapeHtml(context.userId ?? "")}"
       data-user-role="${escapeHtml(context.role ?? "ADMIN")}"
       data-tenant-id="${escapeHtml(context.tenantId ?? "")}"
@@ -776,8 +788,22 @@ export function createWhatsNewRouter(
   router.get("/:slug", async (req: Request, res: Response) => {
     const context = getGuardedWhatsNewContext(req);
     const slugParam = req.params.slug;
-    const slug = Array.isArray(slugParam) ? slugParam[0] : slugParam;
-    if (!slug || slug.trim().length === 0) {
+    const rawSlug = Array.isArray(slugParam) ? slugParam[0] : slugParam;
+    if (!rawSlug || rawSlug.trim().length === 0) {
+      res.status(404).json({ error: "Not found" });
+      return;
+    }
+
+    let slug: string;
+    try {
+      slug = sanitizeSlugOrThrow(rawSlug);
+    } catch {
+      res.status(404).json({ error: "Not found" });
+      return;
+    }
+
+    const post = await repository.findPublishedPostBySlug({ tenantId: context.tenantId }, slug);
+    if (!post) {
       res.status(404).json({ error: "Not found" });
       return;
     }
@@ -792,10 +818,22 @@ export function createWhatsNewRouter(
     logger.info("whats_new_detail_page_viewed", {
       userId: context.userId,
       tenantId: context.tenantId,
-      slug
+      slug,
+      postId: post.id
     });
 
-    res.status(200).type("html").send(renderDetailPage(context, slug, hasUnread));
+    res.status(200).type("html").send(
+      renderDetailPage(
+        context,
+        {
+          title: post.title,
+          category: post.category,
+          publishedAt: post.publishedAt,
+          safeHtml: renderMarkdownSafe(post.bodyMarkdown)
+        },
+        hasUnread
+      )
+    );
   });
 
   return router;
