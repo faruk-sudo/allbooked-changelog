@@ -111,6 +111,84 @@ describe("What's New read API", () => {
     expect(response.body.safe_html).not.toMatch(/href\s*=\s*"\s*javascript:/i);
   });
 
+  it("returns unread=true when published posts exist and no read state is present", async () => {
+    const repo = new InMemoryChangelogRepository([
+      {
+        id: "1",
+        tenantId: null,
+        visibility: "authenticated",
+        status: "published",
+        category: "new",
+        title: "Global update",
+        slug: "global-update",
+        bodyMarkdown: "Body",
+        publishedAt: "2026-02-01T00:00:00.000Z",
+        revision: 1
+      }
+    ]);
+
+    const app = createApp(createConfig(), { changelogRepository: repo });
+    const response = await withAdminHeaders(request(app).get("/api/whats-new/unread"));
+
+    expect(response.status).toBe(200);
+    expect(response.body.has_unread).toBe(true);
+  });
+
+  it("returns unread=false when read_state is newer than the latest publication", async () => {
+    const repo = new InMemoryChangelogRepository(
+      [
+        {
+          id: "1",
+          tenantId: null,
+          visibility: "authenticated",
+          status: "published",
+          category: "new",
+          title: "Global update",
+          slug: "global-update",
+          bodyMarkdown: "Body",
+          publishedAt: "2026-02-01T00:00:00.000Z",
+          revision: 1
+        }
+      ],
+      [
+        {
+          tenantId: "tenant-alpha",
+          userId: "admin-1",
+          lastSeenAt: "2026-02-02T00:00:00.000Z"
+        }
+      ]
+    );
+
+    const app = createApp(createConfig(), { changelogRepository: repo });
+    const response = await withAdminHeaders(request(app).get("/api/whats-new/unread"));
+
+    expect(response.status).toBe(200);
+    expect(response.body.has_unread).toBe(false);
+  });
+
+  it("does not count other tenant posts when computing unread", async () => {
+    const repo = new InMemoryChangelogRepository([
+      {
+        id: "1",
+        tenantId: "tenant-beta",
+        visibility: "authenticated",
+        status: "published",
+        category: "fix",
+        title: "Tenant Beta",
+        slug: "tenant-beta-post",
+        bodyMarkdown: "Beta body",
+        publishedAt: "2026-02-03T00:00:00.000Z",
+        revision: 1
+      }
+    ]);
+
+    const app = createApp(createConfig(), { changelogRepository: repo });
+    const response = await withAdminHeaders(request(app).get("/api/whats-new/unread"));
+
+    expect(response.status).toBe(200);
+    expect(response.body.has_unread).toBe(false);
+  });
+
   it("returns 404 for non-allowlisted tenant", async () => {
     const app = createApp(createConfig(), { changelogRepository: new InMemoryChangelogRepository() });
     const response = await withAdminHeaders(request(app).get("/api/whats-new/posts"), {
@@ -118,6 +196,24 @@ describe("What's New read API", () => {
     });
 
     expect(response.status).toBe(404);
+  });
+
+  it("returns 404 on unread endpoint for non-allowlisted tenant", async () => {
+    const app = createApp(createConfig(), { changelogRepository: new InMemoryChangelogRepository() });
+    const response = await withAdminHeaders(request(app).get("/api/whats-new/unread"), {
+      tenantId: "tenant-beta"
+    });
+
+    expect(response.status).toBe(404);
+  });
+
+  it("returns 403 on unread endpoint for non-admin users", async () => {
+    const app = createApp(createConfig(), { changelogRepository: new InMemoryChangelogRepository() });
+    const response = await withAdminHeaders(request(app).get("/api/whats-new/unread"), {
+      role: "USER"
+    });
+
+    expect(response.status).toBe(403);
   });
 });
 

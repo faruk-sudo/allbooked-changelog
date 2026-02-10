@@ -1,6 +1,7 @@
 import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { createApp } from "../src/app";
+import { InMemoryChangelogRepository } from "../src/changelog/repository";
 import { loadConfig, type AppConfig } from "../src/config";
 
 const config: AppConfig = {
@@ -70,5 +71,73 @@ describe("GET /whats-new", () => {
 
     expect(response.status).toBe(200);
     expect(response.text).toContain("What's New");
+  });
+
+  it("renders bottom bar entry with unread dot when unread updates exist", async () => {
+    const app = createApp(config, {
+      changelogRepository: new InMemoryChangelogRepository([
+        {
+          id: "1",
+          tenantId: null,
+          visibility: "authenticated",
+          status: "published",
+          category: "new",
+          title: "Global update",
+          slug: "global-update",
+          bodyMarkdown: "Body",
+          publishedAt: "2026-02-01T00:00:00.000Z",
+          revision: 1
+        }
+      ])
+    });
+
+    const response = await request(app)
+      .get("/whats-new")
+      .set("x-user-id", "admin-1")
+      .set("x-user-role", "ADMIN")
+      .set("x-tenant-id", "tenant-alpha");
+
+    expect(response.status).toBe(200);
+    expect(response.text).toContain('id="whats-new-entry-link"');
+    expect(response.text).toContain('id="whats-new-unread-dot" class="wn-nav-badge-dot"');
+    expect(response.text).toContain('New updates available');
+  });
+
+  it("renders bottom bar entry without unread dot when unread is false", async () => {
+    const app = createApp(config, {
+      changelogRepository: new InMemoryChangelogRepository(
+        [
+          {
+            id: "1",
+            tenantId: null,
+            visibility: "authenticated",
+            status: "published",
+            category: "new",
+            title: "Global update",
+            slug: "global-update",
+            bodyMarkdown: "Body",
+            publishedAt: "2026-02-01T00:00:00.000Z",
+            revision: 1
+          }
+        ],
+        [
+          {
+            tenantId: "tenant-alpha",
+            userId: "admin-1",
+            lastSeenAt: "2026-03-01T00:00:00.000Z"
+          }
+        ]
+      )
+    });
+
+    const response = await request(app)
+      .get("/whats-new")
+      .set("x-user-id", "admin-1")
+      .set("x-user-role", "ADMIN")
+      .set("x-tenant-id", "tenant-alpha");
+
+    expect(response.status).toBe(200);
+    expect(response.text).toContain('id="whats-new-entry-link"');
+    expect(response.text).toContain('id="whats-new-unread-dot" class="wn-nav-badge-dot" hidden');
   });
 });

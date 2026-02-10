@@ -102,6 +102,11 @@ export interface ListPublishedInput {
   pagination: PaginationInput;
 }
 
+export interface HasUnreadInput {
+  tenantScope: TenantScope;
+  userId: string;
+}
+
 export interface ListAdminPostsInput {
   tenantScope: TenantScope;
   pagination: PaginationInput;
@@ -112,6 +117,7 @@ export interface ListAdminPostsInput {
 export interface ChangelogRepository {
   listPublishedPosts(input: ListPublishedInput): Promise<PublicPostSummary[]>;
   findPublishedPostBySlug(tenantScope: TenantScope, slug: string): Promise<PublicPostDetail | null>;
+  hasUnreadPosts(input: HasUnreadInput): Promise<boolean>;
   listAdminPosts(input: ListAdminPostsInput): Promise<AdminPostSummary[]>;
   createDraftPost(input: CreatePostInput): Promise<AdminPostSummary>;
   updatePost(input: UpdatePostInput): Promise<AdminPostSummary | null>;
@@ -346,6 +352,45 @@ export class PostgresChangelogRepository implements ChangelogRepository {
       tenantId: row.tenant_id,
       bodyMarkdown: row.body_markdown
     };
+  }
+
+  async hasUnreadPosts(input: HasUnreadInput): Promise<boolean> {
+    const tenantId = input.tenantScope.tenantId.trim();
+    const userId = input.userId.trim();
+
+    if (!tenantId) {
+      throw new ValidationError("tenant_id is required");
+    }
+
+    if (!userId) {
+      throw new ValidationError("user_id is required");
+    }
+
+    const result = await this.pool.query<{ has_unread: boolean }>(
+      `
+        SELECT EXISTS (
+          SELECT 1
+          FROM changelog_posts
+          WHERE status = 'published'
+            AND visibility = 'authenticated'
+            AND published_at IS NOT NULL
+            AND (tenant_id = $1 OR tenant_id IS NULL)
+            AND published_at > COALESCE(
+              (
+                SELECT last_seen_at
+                FROM changelog_read_state
+                WHERE tenant_id = $1
+                  AND user_id = $2
+                LIMIT 1
+              ),
+              to_timestamp(0)
+            )
+        ) AS has_unread
+      `,
+      [tenantId, userId]
+    );
+
+    return Boolean(result.rows[0]?.has_unread);
   }
 
   async listAdminPosts(input: ListAdminPostsInput): Promise<AdminPostSummary[]> {
@@ -784,22 +829,36 @@ export interface InMemoryAuditRecord {
   metadata?: Record<string, unknown>;
 }
 
+export interface InMemoryReadStateRecord {
+  tenantId: string;
+  userId: string;
+  lastSeenAt: string;
+}
+
 interface InMemoryPost extends AdminPostSummary {
   bodyMarkdown: string;
 }
 
 export class InMemoryChangelogRepository implements ChangelogRepository {
   private posts: InMemoryPost[] = [];
+  private readStateByTenantAndUser = new Map<string, string>();
   private nextId = 1;
   public readonly auditRecords: InMemoryAuditRecord[] = [];
 
-  constructor(initialPosts: Array<Omit<InMemoryPost, "createdAt" | "updatedAt"> & { createdAt?: string; updatedAt?: string }> = []) {
+  constructor(
+    initialPosts: Array<Omit<InMemoryPost, "createdAt" | "updatedAt"> & { createdAt?: string; updatedAt?: string }> = [],
+    initialReadState: InMemoryReadStateRecord[] = []
+  ) {
     const now = new Date().toISOString();
     this.posts = initialPosts.map((post) => ({
       ...post,
       createdAt: post.createdAt ?? now,
       updatedAt: post.updatedAt ?? now
     }));
+
+    for (const state of initialReadState) {
+      this.readStateByTenantAndUser.set(this.readStateKey(state.tenantId, state.userId), state.lastSeenAt);
+    }
   }
 
   async listPublishedPosts(input: ListPublishedInput): Promise<PublicPostSummary[]> {
@@ -844,6 +903,41 @@ export class InMemoryChangelogRepository implements ChangelogRepository {
       tenantId: post.tenantId,
       bodyMarkdown: post.bodyMarkdown
     };
+  }
+
+  async hasUnreadPosts(input: HasUnreadInput): Promise<boolean> {
+    const tenantId = input.tenantScope.tenantId.trim();
+    const userId = input.userId.trim();
+
+    if (!tenantId) {
+      throw new ValidationError("tenant_id is required");
+    }
+
+    if (!userId) {
+      throw new ValidationError("user_id is required");
+    }
+
+    const latestScopedPublication = this.posts
+      .filter(
+        (post) =>
+          post.status === "published" &&
+          post.visibility === "authenticated" &&
+          post.publishedAt &&
+          (post.tenantId === null || post.tenantId === tenantId)
+      )
+      .map((post) => post.publishedAt as string)
+      .sort((left, right) => right.localeCompare(left))[0];
+
+    if (!latestScopedPublication) {
+      return false;
+    }
+
+    const lastSeenAt = this.readStateByTenantAndUser.get(this.readStateKey(tenantId, userId));
+    if (!lastSeenAt) {
+      return true;
+    }
+
+    return latestScopedPublication > lastSeenAt;
   }
 
   async listAdminPosts(input: ListAdminPostsInput): Promise<AdminPostSummary[]> {
@@ -994,6 +1088,10 @@ export class InMemoryChangelogRepository implements ChangelogRepository {
     return this.transitionStatus(input, "draft", "unpublish");
   }
 
+  public setReadState(record: InMemoryReadStateRecord): void {
+    this.readStateByTenantAndUser.set(this.readStateKey(record.tenantId, record.userId), record.lastSeenAt);
+  }
+
   private async transitionStatus(
     input: TransitionPostInput,
     status: ChangelogPostStatus,
@@ -1040,5 +1138,9 @@ export class InMemoryChangelogRepository implements ChangelogRepository {
 
     const { bodyMarkdown: _ignored, ...summary } = nextPost;
     return summary;
+  }
+
+  private readStateKey(tenantId: string, userId: string): string {
+    return `${tenantId}::${userId}`;
   }
 }

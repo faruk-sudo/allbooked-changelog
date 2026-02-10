@@ -64,6 +64,20 @@ export function createWhatsNewApiRouter(
     }
   });
 
+  router.get("/unread", async (req: Request, res: Response) => {
+    try {
+      const context = getGuardedWhatsNewContext(req);
+      const hasUnread = await repository.hasUnreadPosts({
+        tenantScope: { tenantId: context.tenantId },
+        userId: context.userId
+      });
+
+      res.status(200).json({ has_unread: hasUnread });
+    } catch (error) {
+      handleReadError(res, error);
+    }
+  });
+
   router.get("/posts/:slug", async (req: Request, res: Response) => {
     try {
       const context = getGuardedWhatsNewContext(req);

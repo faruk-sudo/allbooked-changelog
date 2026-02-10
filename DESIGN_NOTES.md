@@ -142,3 +142,13 @@ Issue discovered during verification:
 - `whats_new_admin_post_unpublished`
 
 No PII payloads should be added when instrumentation is implemented.
+
+## Phase 2.1 bottom-bar unread entry point
+
+- Added a reusable nav badge primitive in the What's New page shell (`renderNavBadgeDot` in `src/changelog/routes.ts`) so the same shape can evolve into count badges later.
+- Dot styling is token-driven in `src/styles/whats-new.css`:
+  - size: `--space-2`
+  - radius: `--radius-pill`
+  - color: `--color-primary-bg`
+  - nav spacing/surface/focus behavior reuse existing primitives from `src/styles/primitives.css` (`ds-button`, focus ring tokens).
+- Accessibility: when unread is true, visually hidden copy (`New updates available`) is exposed and link `aria-label` includes the same cue.

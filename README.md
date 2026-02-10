@@ -113,6 +113,7 @@ The smoke check verifies:
 Read API (admin + allowlisted tenant):
 - `GET /api/whats-new/posts?limit=20&offset=0` (supports `cursor` alias for offset)
 - `GET /api/whats-new/posts/:slug`
+- `GET /api/whats-new/unread` -> `{ has_unread: boolean }`
 
 Admin API (admin + allowlisted tenant + publisher allowlist + CSRF token for mutating methods):
 - `GET /api/admin/whats-new/posts?status=draft|published&tenant_id=<current-tenant|global>&limit=20&offset=0`
