@@ -321,18 +321,25 @@ const CLIENT_SCRIPT = `(() => {
   const refreshUnreadIndicator = async () => {
     try {
       const payload = await requestJson("/api/whats-new/unread");
-      setUnreadIndicator(Boolean(payload.has_unread));
-      return true;
+      const hasUnread = Boolean(payload.has_unread);
+      setUnreadIndicator(hasUnread);
+      return hasUnread;
     } catch {
-      return false;
+      return null;
     }
   };
 
   const markSeen = async () => {
-    const now = Date.now();
-    const shouldDebounce = !hasUnreadState && now - lastSeenWriteAtMs < MARK_SEEN_DEBOUNCE_MS;
-    if (shouldDebounce) {
-      return;
+    const withinDebounceWindow =
+      !hasUnreadState &&
+      lastSeenWriteAtMs > 0 &&
+      Date.now() - lastSeenWriteAtMs < MARK_SEEN_DEBOUNCE_MS;
+
+    if (withinDebounceWindow) {
+      const refreshedHasUnread = await refreshUnreadIndicator();
+      if (refreshedHasUnread !== true) {
+        return;
+      }
     }
 
     if (markSeenPromise) {

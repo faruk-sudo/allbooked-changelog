@@ -307,6 +307,8 @@ describe("GET /whats-new", () => {
 
     expect(response.status).toBe(200);
     expect(response.text).toContain("MARK_SEEN_DEBOUNCE_MS = 60_000");
+    expect(response.text).toContain("lastSeenWriteAtMs > 0");
+    expect(response.text).toContain("const refreshedHasUnread = await refreshUnreadIndicator();");
     expect(response.text).toContain("/api/whats-new/seen");
     expect(response.text).toContain('"x-csrf-token"');
   });

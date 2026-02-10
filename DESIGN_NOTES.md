@@ -202,4 +202,5 @@ No PII payloads should be added when instrumentation is implemented.
    - mark seen on side-panel open
    - mark seen on list page load (`/whats-new`)
    - debounce writes for 60s when already read to avoid toggle spam
+   - when inside debounce window, re-check unread state first and only write again if new posts are detected
    - fail-safe behavior: unread dot only clears after successful `/seen`.
