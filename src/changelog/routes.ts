@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { Router, type Request, type Response } from "express";
+import { WHATS_NEW_ANALYTICS_TAXONOMY } from "../analytics/events";
+import { hashAnalyticsTenantId } from "../analytics/tracker";
 import type { AppConfig } from "../config";
 import { appLogger, type Logger } from "../security/logger";
 import { renderMarkdownSafe } from "../security/markdown";
@@ -24,9 +26,13 @@ function escapeHtml(input: string): string {
     .replaceAll("'", "&#039;");
 }
 
+const ANALYTICS_TAXONOMY_LITERAL = JSON.stringify(WHATS_NEW_ANALYTICS_TAXONOMY).replace(/</g, "\\u003c");
+
 const CLIENT_SCRIPT = `(() => {
   const PAGE_SIZE = 12;
   const MARK_SEEN_DEBOUNCE_MS = 60_000;
+  const OPEN_POST_SOURCE_STORAGE_KEY = "whats_new_open_post_source_v1";
+  const OPEN_POST_SOURCE_TTL_MS = 120_000;
   const FOCUSABLE_SELECTOR =
     'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
@@ -41,6 +47,18 @@ const CLIENT_SCRIPT = `(() => {
     "x-tenant-id": appRoot.dataset.tenantId || ""
   };
   const csrfToken = appRoot.dataset.csrfToken || "csrf-token-123456";
+  const analyticsTaxonomy = ${ANALYTICS_TAXONOMY_LITERAL};
+  const analyticsProvider =
+    typeof window !== "undefined" &&
+    window.allbookedAnalytics &&
+    typeof window.allbookedAnalytics.track === "function"
+      ? window.allbookedAnalytics
+      : null;
+  const analyticsContext = {
+    tenant_id: appRoot.dataset.tenantHash || "",
+    user_id: appRoot.dataset.userId || ""
+  };
+  const currentView = appRoot.dataset.view || "";
 
   const unreadLinkEl = document.getElementById("whats-new-entry-link");
   const unreadDotEl = document.getElementById("whats-new-unread-dot");
@@ -63,6 +81,275 @@ const CLIENT_SCRIPT = `(() => {
   let hasUnreadState = appRoot.dataset.initialHasUnread === "true";
   let lastSeenWriteAtMs = 0;
   let markSeenPromise = null;
+  let markSeenInFlightSurface = null;
+
+  const isRecord = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
+
+  const normalizeString = (value) => {
+    if (typeof value !== "string") {
+      return null;
+    }
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : null;
+  };
+
+  const isAllowedEventName = (eventName) =>
+    Array.isArray(analyticsTaxonomy.event_names) && analyticsTaxonomy.event_names.includes(eventName);
+
+  const isForbiddenKey = (key) => {
+    const normalized = String(key || "").trim().toLowerCase();
+    if (normalized.length === 0) {
+      return true;
+    }
+
+    if (
+      Array.isArray(analyticsTaxonomy.forbidden_property_keys) &&
+      analyticsTaxonomy.forbidden_property_keys.includes(normalized)
+    ) {
+      return true;
+    }
+
+    if (typeof analyticsTaxonomy.forbidden_property_key_pattern === "string") {
+      const forbiddenPattern = new RegExp(analyticsTaxonomy.forbidden_property_key_pattern, "i");
+      return forbiddenPattern.test(normalized);
+    }
+
+    return false;
+  };
+
+  const sanitizePagination = (value) => {
+    if (!isRecord(value)) {
+      return null;
+    }
+
+    const schema = analyticsTaxonomy.property_schema?.pagination?.properties;
+    if (!schema) {
+      return null;
+    }
+
+    const result = {};
+
+    if (typeof value.limit === "number" && Number.isFinite(value.limit)) {
+      result.limit = value.limit;
+    }
+
+    if (typeof value.cursor_present === "boolean") {
+      result.cursor_present = value.cursor_present;
+    }
+
+    if (typeof value.page_index === "number" && Number.isFinite(value.page_index)) {
+      result.page_index = value.page_index;
+    }
+
+    if (schema.limit?.required && result.limit === undefined) {
+      return null;
+    }
+
+    if (schema.cursor_present?.required && result.cursor_present === undefined) {
+      return null;
+    }
+
+    return result;
+  };
+
+  const sanitizePropertyValue = (key, value) => {
+    const definition = analyticsTaxonomy.property_schema?.[key];
+    if (!definition) {
+      return null;
+    }
+
+    if (definition.type === "string") {
+      const normalized = normalizeString(value);
+      if (!normalized) {
+        return null;
+      }
+
+      if (Array.isArray(definition.enum_values) && !definition.enum_values.includes(normalized)) {
+        return null;
+      }
+
+      return normalized;
+    }
+
+    if (definition.type === "number") {
+      return typeof value === "number" && Number.isFinite(value) ? value : null;
+    }
+
+    if (definition.type === "boolean") {
+      return typeof value === "boolean" ? value : null;
+    }
+
+    if (definition.type === "object" && key === "pagination") {
+      return sanitizePagination(value);
+    }
+
+    return null;
+  };
+
+  const baseAnalyticsProps = () => {
+    const props = {};
+
+    const tenantId = normalizeString(analyticsContext.tenant_id);
+    if (tenantId) {
+      props.tenant_id = tenantId;
+    }
+
+    const userId = normalizeString(analyticsContext.user_id);
+    if (userId) {
+      props.user_id = userId;
+    }
+
+    return props;
+  };
+
+  const sanitizeEventProps = (eventName, rawProps) => {
+    if (!isAllowedEventName(eventName)) {
+      return null;
+    }
+
+    const allowlist = analyticsTaxonomy.event_property_allowlist?.[eventName];
+    const requiredKeys = analyticsTaxonomy.event_required_properties?.[eventName] || [];
+    if (!Array.isArray(allowlist)) {
+      return null;
+    }
+
+    const merged = {
+      ...baseAnalyticsProps(),
+      ...(isRecord(rawProps) ? rawProps : {})
+    };
+
+    const sanitized = {};
+    for (const key of allowlist) {
+      if (isForbiddenKey(key)) {
+        continue;
+      }
+
+      const value = sanitizePropertyValue(key, merged[key]);
+      if (value !== null && value !== undefined) {
+        sanitized[key] = value;
+      }
+    }
+
+    for (const key of requiredKeys) {
+      if (sanitized[key] === undefined) {
+        return null;
+      }
+    }
+
+    if (
+      Array.isArray(analyticsTaxonomy.events_requiring_post_identity) &&
+      analyticsTaxonomy.events_requiring_post_identity.includes(eventName)
+    ) {
+      const postId = typeof sanitized.post_id === "string" ? sanitized.post_id : "";
+      const slug = typeof sanitized.slug === "string" ? sanitized.slug : "";
+      if (!postId && !slug) {
+        return null;
+      }
+    }
+
+    return sanitized;
+  };
+
+  const trackEvent = (eventName, rawProps = {}) => {
+    if (!analyticsProvider) {
+      return;
+    }
+
+    const sanitized = sanitizeEventProps(eventName, rawProps);
+    if (!sanitized) {
+      return;
+    }
+
+    try {
+      analyticsProvider.track(eventName, sanitized);
+    } catch {
+      // Keep UX unaffected if analytics provider is unavailable.
+    }
+  };
+
+  const getFeedSurface = () => (currentView === "list" ? "page" : "panel");
+
+  const rememberOpenPostSource = (sourceSurface, postId, slug) => {
+    const normalizedSlug = normalizeString(slug);
+    const normalizedPostId = normalizeString(postId);
+    if (!normalizedSlug && !normalizedPostId) {
+      return;
+    }
+
+    try {
+      sessionStorage.setItem(
+        OPEN_POST_SOURCE_STORAGE_KEY,
+        JSON.stringify({
+          surface: sourceSurface === "panel" ? "panel" : "page",
+          slug: normalizedSlug,
+          post_id: normalizedPostId,
+          ts: Date.now()
+        })
+      );
+    } catch {
+      // Ignore sessionStorage failures.
+    }
+  };
+
+  const consumeOpenPostSource = (slug) => {
+    const normalizedSlug = normalizeString(slug);
+    if (!normalizedSlug) {
+      return null;
+    }
+
+    try {
+      const storedRaw = sessionStorage.getItem(OPEN_POST_SOURCE_STORAGE_KEY);
+      if (!storedRaw) {
+        return null;
+      }
+
+      sessionStorage.removeItem(OPEN_POST_SOURCE_STORAGE_KEY);
+
+      const parsed = JSON.parse(storedRaw);
+      if (!isRecord(parsed)) {
+        return null;
+      }
+
+      if (typeof parsed.ts !== "number" || Date.now() - parsed.ts > OPEN_POST_SOURCE_TTL_MS) {
+        return null;
+      }
+
+      if (normalizeString(parsed.slug) !== normalizedSlug) {
+        return null;
+      }
+
+      return parsed.surface === "panel" ? "panel" : "page";
+    } catch {
+      return null;
+    }
+  };
+
+  const mapSeenErrorToCode = (error) => {
+    if (isRecord(error) && typeof error.status === "number") {
+      if (error.status === 401 || error.status === 403) {
+        return "unauthorized";
+      }
+      if (error.status >= 500) {
+        return "server_error";
+      }
+      if (error.status >= 400) {
+        return "request_error";
+      }
+    }
+
+    if (isRecord(error) && typeof error.code === "string") {
+      const code = error.code.trim().toUpperCase();
+      if (["ECONNREFUSED", "ENOTFOUND", "ETIMEDOUT", "ECONNRESET"].includes(code)) {
+        return "network_error";
+      }
+    }
+
+    if (error instanceof Error && (error.name === "TypeError" || error.name === "AbortError")) {
+      return "network_error";
+    }
+
+    return "unknown_error";
+  };
 
   const setUnreadIndicator = (hasUnread) => {
     hasUnreadState = hasUnread;
@@ -92,7 +379,7 @@ const CLIENT_SCRIPT = `(() => {
     });
 
     if (!response.ok) {
-      throw new Error("HTTP " + response.status);
+      throw { status: response.status };
     }
 
     return response.json();
@@ -108,7 +395,7 @@ const CLIENT_SCRIPT = `(() => {
     });
 
     if (!response.ok) {
-      throw new Error("HTTP " + response.status);
+      throw { status: response.status };
     }
 
     return response.json();
@@ -155,11 +442,19 @@ const CLIENT_SCRIPT = `(() => {
     titleEl.className = "wn-feed-title";
 
     const slug = typeof post.slug === "string" ? post.slug.trim() : "";
+    const postId = typeof post.id === "string" ? post.id.trim() : "";
     const canNavigate = detailBasePath.length > 0 && slug.length > 0;
     if (canNavigate) {
       const linkEl = document.createElement("a");
       linkEl.className = "wn-post-link";
       linkEl.href = detailBasePath + encodeURIComponent(slug);
+      linkEl.dataset.slug = slug;
+      if (postId.length > 0) {
+        linkEl.dataset.postId = postId;
+      }
+      linkEl.addEventListener("click", () => {
+        rememberOpenPostSource(getFeedSurface(), postId, slug);
+      });
       linkEl.textContent =
         typeof post.title === "string" && post.title.trim().length > 0 ? post.title : "Untitled update";
       titleEl.appendChild(linkEl);
@@ -191,6 +486,7 @@ const CLIENT_SCRIPT = `(() => {
   const feedState = {
     items: [],
     cursor: null,
+    pageIndex: 0,
     hasMore: false,
     hasLoadedOnce: false,
     loadingInitial: false,
@@ -286,6 +582,7 @@ const CLIENT_SCRIPT = `(() => {
     if (mode === "initial") {
       feedState.items = [];
       feedState.cursor = null;
+      feedState.pageIndex = 0;
       feedState.hasMore = false;
       feedState.loadingInitial = true;
     } else {
@@ -301,8 +598,10 @@ const CLIENT_SCRIPT = `(() => {
       const items = Array.isArray(payload.items) ? payload.items : [];
       if (mode === "initial") {
         feedState.items = items;
+        feedState.pageIndex = 0;
       } else {
         feedState.items = feedState.items.concat(items);
+        feedState.pageIndex += 1;
       }
       feedState.cursor = readNextCursor(payload);
       feedState.hasMore = Boolean(feedState.cursor);
@@ -329,7 +628,8 @@ const CLIENT_SCRIPT = `(() => {
     }
   };
 
-  const markSeen = async () => {
+  const markSeen = async (sourceSurface) => {
+    const surface = sourceSurface === "panel" ? "panel" : "page";
     const withinDebounceWindow =
       !hasUnreadState &&
       lastSeenWriteAtMs > 0 &&
@@ -346,15 +646,27 @@ const CLIENT_SCRIPT = `(() => {
       return markSeenPromise;
     }
 
+    markSeenInFlightSurface = surface;
+
     markSeenPromise = (async () => {
       try {
         await requestPostJson("/api/whats-new/seen");
         lastSeenWriteAtMs = Date.now();
+        trackEvent("whats_new.mark_seen_success", {
+          surface: markSeenInFlightSurface || surface,
+          result: "success"
+        });
         setUnreadIndicator(false);
         await refreshUnreadIndicator();
-      } catch {
+      } catch (error) {
+        trackEvent("whats_new.mark_seen_failure", {
+          surface: markSeenInFlightSurface || surface,
+          result: "failure",
+          error_code: mapSeenErrorToCode(error)
+        });
         // Fail-safe: keep current unread state when mark-seen fails.
       } finally {
+        markSeenInFlightSurface = null;
         markSeenPromise = null;
       }
     })();
@@ -433,11 +745,15 @@ const CLIENT_SCRIPT = `(() => {
     document.addEventListener("keydown", onPanelKeydown);
     focusInitialPanelTarget();
 
+    trackEvent("whats_new.open_panel", {
+      surface: "panel"
+    });
+
     if (!feedState.hasLoadedOnce) {
       void loadFeedPage("initial");
     }
 
-    void markSeen();
+    void markSeen("panel");
   };
 
   const onPanelKeydown = (event) => {
@@ -512,6 +828,14 @@ const CLIENT_SCRIPT = `(() => {
 
   if (loadMoreEl) {
     loadMoreEl.addEventListener("click", () => {
+      trackEvent("whats_new.load_more", {
+        surface: getFeedSurface(),
+        pagination: {
+          limit: PAGE_SIZE,
+          cursor_present: Boolean(feedState.cursor),
+          page_index: feedState.pageIndex + 1
+        }
+      });
       void loadFeedPage("more");
     });
   }
@@ -524,11 +848,28 @@ const CLIENT_SCRIPT = `(() => {
   }
 
   (async () => {
+    if (currentView === "list") {
+      trackEvent("whats_new.open_full_page", {
+        surface: "page"
+      });
+    }
+
+    if (currentView === "detail") {
+      const detailPostSlug = appRoot.dataset.currentPostSlug || "";
+      const detailPostId = appRoot.dataset.currentPostId || "";
+      const detailSourceSurface = consumeOpenPostSource(detailPostSlug) || "page";
+
+      trackEvent("whats_new.open_post", {
+        surface: detailSourceSurface,
+        post_id: detailPostId,
+        slug: detailPostSlug
+      });
+    }
+
     setUnreadIndicator(hasUnreadState);
     const unreadRefreshPromise = refreshUnreadIndicator();
-    const markSeenOnListPromise = appRoot.dataset.view === "list" ? markSeen() : Promise.resolve();
-    const loadFeedOnListPromise =
-      appRoot.dataset.view === "list" ? loadFeedPage("initial") : Promise.resolve();
+    const markSeenOnListPromise = currentView === "list" ? markSeen("page") : Promise.resolve();
+    const loadFeedOnListPromise = currentView === "list" ? loadFeedPage("initial") : Promise.resolve();
 
     await unreadRefreshPromise;
     await markSeenOnListPromise;
@@ -633,6 +974,8 @@ interface CategoryPresentation {
 }
 
 interface DetailPagePost {
+  id: string;
+  slug: string;
   title: string;
   category: ChangelogPostCategory;
   publishedAt: string;
@@ -658,6 +1001,11 @@ function formatPublishedDate(isoValue: string): string {
   }
 
   return new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeZone: "UTC" }).format(parsed);
+}
+
+function renderAnalyticsTenantId(tenantId: string | undefined): string {
+  const hashedTenantId = hashAnalyticsTenantId(tenantId);
+  return hashedTenantId ?? "";
 }
 
 function renderListPage(context: WhatsNewRequestContext, hasUnread: boolean): string {
@@ -690,6 +1038,7 @@ function renderListPage(context: WhatsNewRequestContext, hasUnread: boolean): st
       data-user-id="${escapeHtml(context.userId ?? "")}"
       data-user-role="${escapeHtml(context.role ?? "ADMIN")}"
       data-tenant-id="${escapeHtml(context.tenantId ?? "")}"
+      data-tenant-hash="${escapeHtml(renderAnalyticsTenantId(context.tenantId))}"
       data-csrf-token="csrf-token-123456"
       data-initial-has-unread="${String(hasUnread)}"
       data-detail-base="/whats-new/"
@@ -734,9 +1083,12 @@ function renderDetailPage(context: WhatsNewRequestContext, post: DetailPagePost,
       data-user-id="${escapeHtml(context.userId ?? "")}"
       data-user-role="${escapeHtml(context.role ?? "ADMIN")}"
       data-tenant-id="${escapeHtml(context.tenantId ?? "")}"
+      data-tenant-hash="${escapeHtml(renderAnalyticsTenantId(context.tenantId))}"
       data-csrf-token="csrf-token-123456"
       data-initial-has-unread="${String(hasUnread)}"
       data-detail-base="/whats-new/"
+      data-current-post-id="${escapeHtml(post.id)}"
+      data-current-post-slug="${escapeHtml(post.slug)}"
     ></div>
     <script src="/whats-new/assets/client.js" defer></script>
   </body>
@@ -833,6 +1185,8 @@ export function createWhatsNewRouter(
       renderDetailPage(
         context,
         {
+          id: post.id,
+          slug: post.slug,
           title: post.title,
           category: post.category,
           publishedAt: post.publishedAt,

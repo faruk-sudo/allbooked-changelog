@@ -311,5 +311,12 @@ describe("GET /whats-new", () => {
     expect(response.text).toContain("const refreshedHasUnread = await refreshUnreadIndicator();");
     expect(response.text).toContain("/api/whats-new/seen");
     expect(response.text).toContain('"x-csrf-token"');
+    expect(response.text).toContain('trackEvent("whats_new.open_panel"');
+    expect((response.text.match(/trackEvent\("whats_new\.open_panel"/g) || []).length).toBe(1);
+    expect(response.text).toContain('trackEvent("whats_new.load_more"');
+    expect(response.text).toContain('trackEvent("whats_new.open_full_page"');
+    expect(response.text).toContain('trackEvent("whats_new.open_post"');
+    expect(response.text).toContain('trackEvent("whats_new.mark_seen_success"');
+    expect(response.text).toContain('trackEvent("whats_new.mark_seen_failure"');
   });
 });

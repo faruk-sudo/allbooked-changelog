@@ -204,3 +204,22 @@ No PII payloads should be added when instrumentation is implemented.
    - debounce writes for 60s when already read to avoid toggle spam
    - when inside debounce window, re-check unread state first and only write again if new posts are detected
    - fail-safe behavior: unread dot only clears after successful `/seen`.
+
+## Phase 2.5 instrumentation (panel + full-page + detail)
+
+### Decisions
+
+1. Added a small analytics module (`src/analytics/events.ts`, `src/analytics/tracker.ts`) as the single source of truth for:
+   - allowed event names
+   - event/property allowlists + required fields
+   - forbidden/redacted keys
+2. Kept runtime integration dependency-free:
+   - browser wrapper uses `window.allbookedAnalytics.track(eventName, properties)` when present
+   - no provider configured => silent no-op (no UX impact)
+3. Applied strict payload minimization and privacy defaults:
+   - tenant is emitted as hashed `tenant_id` (`sha256:<digest>`)
+   - no titles, body content, emails, IPs, tokens, headers, or raw error text
+4. Wired events on user intent points:
+   - panel open, full-page mount, detail open, mark-seen success/failure, load-more click
+   - detail open source (`panel` vs `page`) is carried via short-lived `sessionStorage` handoff from feed link click
+5. Added analytics consumer notes in `docs/analytics.md` with event definitions and starter query patterns.
