@@ -56,8 +56,8 @@ curl -i http://localhost:3000/whats-new \
 - `WHATS_NEW_KILL_SWITCH`: `true|false`; when `true`, blocks all tenants
 - `WHATS_NEW_ALLOWLIST_ENABLED`: `true|false`; when `false`, any tenant with context is allowed
 - `WHATS_NEW_ALLOWLIST_TENANT_IDS`: comma-separated tenant IDs (e.g. `tenant-alpha,tenant-beta`)
-- `WHATS_NEW_PUBLISHER_ALLOWLIST_USER_IDS`: comma-separated user IDs allowed to use admin CRUD endpoints
-- `WHATS_NEW_PUBLISHER_ALLOWLIST_EMAILS`: optional comma-separated fallback email allowlist (exact match)
+- `WHATS_NEW_PUBLISHER_ALLOWLIST_USER_IDS`: comma-separated stable user IDs allowed to use admin CRUD endpoints
+- `WHATS_NEW_PUBLISHER_ALLOWLIST_EMAILS`: optional comma-separated fallback email allowlist (exact match only; use IDs when available)
 - `WHATS_NEW_DEV_AUTH_BYPASS`: `true|false`; when `true`, missing auth/tenant headers are auto-populated for local browser testing (disabled automatically in production `NODE_ENV`)
 - `WHATS_NEW_DEV_USER_ID`: fallback user ID when dev auth bypass is enabled
 - `WHATS_NEW_DEV_USER_ROLE`: fallback role (`ADMIN` or `USER`) when dev auth bypass is enabled
@@ -74,7 +74,7 @@ curl -i http://localhost:3000/whats-new \
 - Publisher allowlist gate enforced on admin CRUD endpoints
 - CSP/security headers via Helmet for `/whats-new` routes
 - Markdown rendering blocks raw HTML and sanitizes output
-- Logging intentionally avoids markdown/body content
+- Logging is structured and safe by default (redacts body fields, auth/cookie headers, and secret-like values)
 - CSRF token required on mutating admin endpoints
 
 ## Database setup and migrations

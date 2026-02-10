@@ -81,7 +81,7 @@ describe("What's New read API", () => {
     ]);
   });
 
-  it("returns sanitized HTML on detail endpoint", async () => {
+  it("returns sanitized HTML on detail endpoint and neutralizes XSS payloads", async () => {
     const repo = new InMemoryChangelogRepository([
       {
         id: "1",
@@ -91,7 +91,8 @@ describe("What's New read API", () => {
         category: "new",
         title: "Unsafe markdown",
         slug: "unsafe-markdown",
-        bodyMarkdown: "<script>alert(1)</script> [link](javascript:alert(2)) **safe**",
+        bodyMarkdown:
+          "<script>alert(1)</script>\n<img src=x onerror=alert(1)>\n<svg onload=alert(2)></svg>\n[good](https://example.com)\n[bad](javascript:alert(3))\n**safe**",
         publishedAt: "2026-02-01T00:00:00.000Z",
         revision: 1
       }
@@ -102,8 +103,12 @@ describe("What's New read API", () => {
 
     expect(response.status).toBe(200);
     expect(response.body.safe_html).toContain("<strong>safe</strong>");
-    expect(response.body.safe_html).not.toContain("<script>");
-    expect(response.body.safe_html).not.toContain("<a ");
+    expect(response.body.safe_html).toContain('href="https://example.com"');
+    expect(response.body.safe_html).toContain('target="_blank"');
+    expect(response.body.safe_html).toContain('rel="noopener noreferrer"');
+    expect(response.body.safe_html).not.toMatch(/<script/i);
+    expect(response.body.safe_html).not.toMatch(/<[^>]+\son(?:error|load)\s*=/i);
+    expect(response.body.safe_html).not.toMatch(/href\s*=\s*"\s*javascript:/i);
   });
 
   it("returns 404 for non-allowlisted tenant", async () => {
@@ -189,5 +194,10 @@ describe("What's New admin API", () => {
     expect(unpublishResponse.body.published_at).toBeNull();
 
     expect(repo.auditRecords.map((entry) => entry.action)).toEqual(["create", "publish", "unpublish"]);
+    for (const entry of repo.auditRecords) {
+      expect(JSON.stringify(entry.metadata ?? {})).not.toContain("\"body_markdown\":");
+      expect(JSON.stringify(entry.metadata ?? {})).not.toContain("\"bodyMarkdown\":");
+      expect(JSON.stringify(entry.metadata ?? {})).not.toContain("\"markdown\":");
+    }
   });
 });

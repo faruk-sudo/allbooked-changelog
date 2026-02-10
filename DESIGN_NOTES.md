@@ -8,10 +8,10 @@
 ## Security model (v1)
 ### Threats addressed
 - XSS from markdown: mitigated with `markdown-it` (`html: false`) and strict `sanitize-html` allowlist.
-- Authz bypass: `requireAuthenticated` and `requireAdmin` are enforced on every `/whats-new` route.
-- Tenant isolation failure: `requireTenantContext` + `requireAllowlistedTenant` middleware enforced server-side.
+- Authz bypass: centralized What's New request context + `requireAdmin` are enforced on every `/whats-new` route.
+- Tenant isolation failure: `requireWhatsNewEnabled` enforces tenant context + allowlist/kill-switch server-side.
 - CSRF on state changes: `requireCsrfToken` middleware is prepared for future mutating endpoints.
-- Unsafe logging: route logs emit only IDs and action summaries; markdown/body fields are redacted by logger utility.
+- Unsafe logging: `sanitizeLogMetadata` redacts body fields, auth/cookie headers, and secret-like/env values before emitting structured logs.
 
 ### Route behavior choices
 - Not allowlisted tenant -> `404` to avoid feature exposure.
@@ -83,16 +83,21 @@ The repository was empty at implementation time, so no existing UI stack, stylin
 ### Security and privacy controls
 
 1. Shared guards applied server-side to all What’s New endpoints:
-   - authenticated user required
-   - ADMIN role required
-   - tenant context required
-   - tenant allowlist + kill switch required
-2. Admin CRUD endpoints require an additional publisher allowlist gate.
+   - centralized context hydration from existing header stub/dev fallback
+   - `requireAdmin` for authenticated ADMIN role
+   - `requireWhatsNewEnabled` for tenant context + tenant allowlist + kill switch
+2. Admin CRUD endpoints require `requirePublisher` (user-id allowlist first, exact-match email fallback).
 3. CSRF token validation is enforced on mutating admin methods (`POST`/`PUT`).
 4. Markdown is rendered through the existing safe pipeline (`markdown-it` with raw HTML disabled + strict `sanitize-html`).
-5. State-changing admin actions write audit rows with summary metadata only; markdown bodies are never stored in audit metadata.
-6. Application logs include IDs and action summaries only; markdown content remains redacted.
+5. State-changing admin actions write through a shared audit helper that strips forbidden markdown/body keys from metadata before persistence.
+6. Application logs are structured and minimal; request bodies are excluded by default, and sensitive headers/secrets are redacted.
 7. Local-browser developer ergonomics use a configurable dev auth fallback (`WHATS_NEW_DEV_AUTH_BYPASS`) that auto-hydrates auth/tenant context when headers are missing; this is disabled automatically in production `NODE_ENV`.
+
+### Observability and rollout notes
+
+- Kill switch default stays OFF (`WHATS_NEW_KILL_SWITCH=false`) and can be toggled for immediate rollback.
+- Application events are emitted as structured JSON logs via `appLogger` (safe metadata redaction applied globally).
+- Durable audit events are persisted in `changelog_audit_log`; query this table for create/update/publish/unpublish traces.
 
 ### Tradeoffs and follow-ups
 

@@ -1,8 +1,10 @@
 import { Router, type Request, type Response } from "express";
 import type { AppConfig } from "../config";
 import { appLogger, type Logger } from "../security/logger";
+import { getGuardedWhatsNewContext } from "./authz";
 import { applyWhatsNewReadGuards } from "./guards";
 import type { ChangelogRepository } from "./repository";
+import type { WhatsNewRequestContext } from "./request-context";
 
 function escapeHtml(input: string): string {
   return input
@@ -112,7 +114,7 @@ const CLIENT_SCRIPT = `(() => {
   })();
 })();`;
 
-function renderListPage(req: Request): string {
+function renderListPage(context: WhatsNewRequestContext): string {
   return `<!doctype html>
 <html lang="en">
   <head>
@@ -123,15 +125,15 @@ function renderListPage(req: Request): string {
   <body>
     <main>
       <h1>What's New</h1>
-      <p>Tenant: ${escapeHtml(req.tenantId ?? "unknown")}</p>
+      <p>Tenant: ${escapeHtml(context.tenantId ?? "unknown")}</p>
       <p id="whats-new-status" aria-live="polite"></p>
       <ul id="whats-new-list"></ul>
       <div
         id="whats-new-app"
         data-view="list"
-        data-user-id="${escapeHtml(req.auth?.userId ?? "")}"
-        data-user-role="${escapeHtml(req.auth?.role ?? "ADMIN")}"
-        data-tenant-id="${escapeHtml(req.tenantId ?? "")}"
+        data-user-id="${escapeHtml(context.userId ?? "")}"
+        data-user-role="${escapeHtml(context.role ?? "ADMIN")}"
+        data-tenant-id="${escapeHtml(context.tenantId ?? "")}"
       ></div>
     </main>
     <script src="/whats-new/assets/client.js" defer></script>
@@ -139,7 +141,7 @@ function renderListPage(req: Request): string {
 </html>`;
 }
 
-function renderDetailPage(req: Request, slug: string): string {
+function renderDetailPage(context: WhatsNewRequestContext, slug: string): string {
   return `<!doctype html>
 <html lang="en">
   <head>
@@ -157,9 +159,9 @@ function renderDetailPage(req: Request, slug: string): string {
         id="whats-new-app"
         data-view="detail"
         data-slug="${escapeHtml(slug)}"
-        data-user-id="${escapeHtml(req.auth?.userId ?? "")}"
-        data-user-role="${escapeHtml(req.auth?.role ?? "ADMIN")}"
-        data-tenant-id="${escapeHtml(req.tenantId ?? "")}"
+        data-user-id="${escapeHtml(context.userId ?? "")}"
+        data-user-role="${escapeHtml(context.role ?? "ADMIN")}"
+        data-tenant-id="${escapeHtml(context.tenantId ?? "")}"
       ></div>
     </main>
     <script src="/whats-new/assets/client.js" defer></script>
@@ -181,15 +183,18 @@ export function createWhatsNewRouter(
   applyWhatsNewReadGuards(router, config);
 
   router.get("/", (req: Request, res: Response) => {
+    const context = getGuardedWhatsNewContext(req);
+
     logger.info("whats_new_page_viewed", {
-      userId: req.auth?.userId,
-      tenantId: req.tenantId
+      userId: context.userId,
+      tenantId: context.tenantId
     });
 
-    res.status(200).type("html").send(renderListPage(req));
+    res.status(200).type("html").send(renderListPage(context));
   });
 
   router.get("/:slug", (req: Request, res: Response) => {
+    const context = getGuardedWhatsNewContext(req);
     const slugParam = req.params.slug;
     const slug = Array.isArray(slugParam) ? slugParam[0] : slugParam;
     if (!slug || slug.trim().length === 0) {
@@ -198,12 +203,12 @@ export function createWhatsNewRouter(
     }
 
     logger.info("whats_new_detail_page_viewed", {
-      userId: req.auth?.userId,
-      tenantId: req.tenantId,
+      userId: context.userId,
+      tenantId: context.tenantId,
       slug
     });
 
-    res.status(200).type("html").send(renderDetailPage(req, slug));
+    res.status(200).type("html").send(renderDetailPage(context, slug));
   });
 
   return router;

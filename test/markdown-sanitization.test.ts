@@ -22,4 +22,14 @@ describe("renderMarkdownSafe", () => {
     expect(html).toContain('target="_blank"');
     expect(html).toContain('rel="noopener noreferrer"');
   });
+
+  it("does not emit script tags, event handlers, or javascript href attributes", () => {
+    const html = renderMarkdownSafe(
+      "<script>alert(1)</script><img src=x onerror=alert(1)> [bad](javascript:alert(2)) [ok](https://example.com)"
+    );
+
+    expect(html).not.toMatch(/<script/i);
+    expect(html).not.toMatch(/<[^>]+\son(?:error|load)\s*=/i);
+    expect(html).not.toMatch(/href\s*=\s*"\s*javascript:/i);
+  });
 });

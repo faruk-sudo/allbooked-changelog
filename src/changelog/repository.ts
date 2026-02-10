@@ -1,4 +1,5 @@
 import type { Pool, PoolClient } from "pg";
+import { sanitizeAuditMetadata, writeAuditLogRow } from "./audit";
 
 export type ChangelogVisibility = "authenticated" | "public";
 export type ChangelogPostStatus = "draft" | "published";
@@ -266,25 +267,6 @@ function toAdminSummary(row: AdminSummaryRow): AdminPostSummary {
   };
 }
 
-async function recordAuditLog(
-  client: PoolClient,
-  input: {
-    tenantId: string | null;
-    actorId: string;
-    action: ChangelogAuditAction;
-    postId: string;
-    metadata?: Record<string, unknown>;
-  }
-): Promise<void> {
-  await client.query(
-    `
-      INSERT INTO changelog_audit_log (tenant_id, actor_id, action, post_id, metadata)
-      VALUES ($1, $2, $3, $4, $5::jsonb)
-    `,
-    [input.tenantId, input.actorId, input.action, input.postId, input.metadata ? JSON.stringify(input.metadata) : null]
-  );
-}
-
 export class PostgresChangelogRepository implements ChangelogRepository {
   constructor(private readonly pool: Pool) {}
 
@@ -474,7 +456,7 @@ export class PostgresChangelogRepository implements ChangelogRepository {
 
       const post = insertResult.rows[0];
 
-      await recordAuditLog(client, {
+      await writeAuditLogRow(client, {
         tenantId: post.tenant_id,
         actorId,
         action: "create",
@@ -623,7 +605,7 @@ export class PostgresChangelogRepository implements ChangelogRepository {
 
       const updated = updateResult.rows[0];
 
-      await recordAuditLog(client, {
+      await writeAuditLogRow(client, {
         tenantId: updated.tenant_id,
         actorId,
         action: "update",
@@ -736,7 +718,7 @@ export class PostgresChangelogRepository implements ChangelogRepository {
 
       const updated = updateResult.rows[0];
 
-      await recordAuditLog(client, {
+      await writeAuditLogRow(client, {
         tenantId: updated.tenant_id,
         actorId,
         action,
@@ -798,6 +780,7 @@ export interface InMemoryAuditRecord {
   actorId: string;
   action: ChangelogAuditAction;
   postId: string;
+  at: string;
   metadata?: Record<string, unknown>;
 }
 
@@ -908,9 +891,10 @@ export class InMemoryChangelogRepository implements ChangelogRepository {
       actorId: input.actorId,
       action: "create",
       postId: post.id,
-      metadata: {
+      at: new Date().toISOString(),
+      metadata: sanitizeAuditMetadata({
         changed_fields: ["title", "slug", "category", "body_markdown", "tenant_id", "status", "visibility"]
-      }
+      })
     });
 
     const { bodyMarkdown: _ignored, ...summary } = post;
@@ -992,9 +976,10 @@ export class InMemoryChangelogRepository implements ChangelogRepository {
       actorId: input.actorId,
       action: "update",
       postId: nextPost.id,
-      metadata: {
+      at: new Date().toISOString(),
+      metadata: sanitizeAuditMetadata({
         changed_fields: changedFields
-      }
+      })
     });
 
     const { bodyMarkdown: _ignored, ...summary } = nextPost;
@@ -1046,10 +1031,11 @@ export class InMemoryChangelogRepository implements ChangelogRepository {
       actorId: input.actorId,
       action,
       postId: nextPost.id,
-      metadata: {
+      at: new Date().toISOString(),
+      metadata: sanitizeAuditMetadata({
         previous_status: existing.status,
         new_status: nextPost.status
-      }
+      })
     });
 
     const { bodyMarkdown: _ignored, ...summary } = nextPost;

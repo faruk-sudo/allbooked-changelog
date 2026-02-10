@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import type { AppConfig } from "../config";
 import { appLogger, type Logger } from "../security/logger";
+import { getGuardedWhatsNewContext } from "./authz";
 import { applyWhatsNewAdminGuards } from "./guards";
 import { parseAdminTenantFilter, parseExpectedRevision, parseOptionalStatusFilter, parsePagination } from "./http";
 import {
@@ -107,18 +108,14 @@ export function createWhatsNewAdminRouter(
   applyWhatsNewAdminGuards(router, config);
 
   router.get("/posts", async (req: Request, res: Response) => {
-    if (!req.tenantId) {
-      res.status(400).json({ error: "Tenant context missing" });
-      return;
-    }
-
     try {
+      const context = getGuardedWhatsNewContext(req);
       const pagination = parsePagination(req);
       const status = parseOptionalStatusFilter(req);
       const tenantFilter = parseAdminTenantFilter(req);
 
       const posts = await repository.listAdminPosts({
-        tenantScope: { tenantId: req.tenantId },
+        tenantScope: { tenantId: context.tenantId },
         pagination: {
           limit: pagination.limit,
           offset: pagination.offset
@@ -128,8 +125,8 @@ export function createWhatsNewAdminRouter(
       });
 
       logger.info("whats_new_admin_posts_listed", {
-        actorId: req.auth?.userId,
-        tenantId: req.tenantId,
+        actorId: context.userId,
+        tenantId: context.tenantId,
         count: posts.length,
         status,
         offset: pagination.offset,
@@ -150,12 +147,8 @@ export function createWhatsNewAdminRouter(
   });
 
   router.post("/posts", async (req: Request, res: Response) => {
-    if (!req.tenantId || !req.auth?.userId) {
-      res.status(400).json({ error: "Invalid request context" });
-      return;
-    }
-
     try {
+      const context = getGuardedWhatsNewContext(req);
       const body = (req.body ?? {}) as CreatePostBody;
       const title = normalizeOptionalString("title", body.title);
       const bodyMarkdown = normalizeOptionalString("body_markdown", body.body_markdown);
@@ -166,8 +159,8 @@ export function createWhatsNewAdminRouter(
       }
 
       const createdPost = await repository.createDraftPost({
-        actorId: req.auth.userId,
-        tenantScope: { tenantId: req.tenantId },
+        actorId: context.userId,
+        tenantScope: { tenantId: context.tenantId },
         tenantId: normalizeOptionalTenantId(body.tenant_id),
         title,
         slug: body.slug === undefined ? undefined : sanitizeSlugOrThrow(normalizeOptionalString("slug", body.slug) ?? ""),
@@ -176,8 +169,8 @@ export function createWhatsNewAdminRouter(
       });
 
       logger.info("whats_new_admin_post_created", {
-        actorId: req.auth.userId,
-        tenantId: req.tenantId,
+        actorId: context.userId,
+        tenantId: context.tenantId,
         postId: createdPost.id
       });
 
@@ -188,19 +181,15 @@ export function createWhatsNewAdminRouter(
   });
 
   router.put("/posts/:id", async (req: Request, res: Response) => {
-    if (!req.tenantId || !req.auth?.userId) {
-      res.status(400).json({ error: "Invalid request context" });
-      return;
-    }
-
     try {
+      const context = getGuardedWhatsNewContext(req);
       const idParam = req.params.id;
       const postId = Array.isArray(idParam) ? idParam[0] ?? "" : idParam ?? "";
       const body = (req.body ?? {}) as UpdatePostBody;
 
       const updatedPost = await repository.updatePost({
-        actorId: req.auth.userId,
-        tenantScope: { tenantId: req.tenantId },
+        actorId: context.userId,
+        tenantScope: { tenantId: context.tenantId },
         id: postId,
         title: normalizeOptionalString("title", body.title),
         slug:
@@ -222,8 +211,8 @@ export function createWhatsNewAdminRouter(
       }
 
       logger.info("whats_new_admin_post_updated", {
-        actorId: req.auth.userId,
-        tenantId: req.tenantId,
+        actorId: context.userId,
+        tenantId: context.tenantId,
         postId: updatedPost.id
       });
 
@@ -234,17 +223,13 @@ export function createWhatsNewAdminRouter(
   });
 
   router.post("/posts/:id/publish", async (req: Request, res: Response) => {
-    if (!req.tenantId || !req.auth?.userId) {
-      res.status(400).json({ error: "Invalid request context" });
-      return;
-    }
-
     try {
+      const context = getGuardedWhatsNewContext(req);
       const idParam = req.params.id;
       const postId = Array.isArray(idParam) ? idParam[0] ?? "" : idParam ?? "";
       const post = await repository.publishPost({
-        actorId: req.auth.userId,
-        tenantScope: { tenantId: req.tenantId },
+        actorId: context.userId,
+        tenantScope: { tenantId: context.tenantId },
         id: postId,
         expectedRevision: parseExpectedRevision(req)
       });
@@ -255,8 +240,8 @@ export function createWhatsNewAdminRouter(
       }
 
       logger.info("whats_new_admin_post_published", {
-        actorId: req.auth.userId,
-        tenantId: req.tenantId,
+        actorId: context.userId,
+        tenantId: context.tenantId,
         postId: post.id
       });
 
@@ -267,17 +252,13 @@ export function createWhatsNewAdminRouter(
   });
 
   router.post("/posts/:id/unpublish", async (req: Request, res: Response) => {
-    if (!req.tenantId || !req.auth?.userId) {
-      res.status(400).json({ error: "Invalid request context" });
-      return;
-    }
-
     try {
+      const context = getGuardedWhatsNewContext(req);
       const idParam = req.params.id;
       const postId = Array.isArray(idParam) ? idParam[0] ?? "" : idParam ?? "";
       const post = await repository.unpublishPost({
-        actorId: req.auth.userId,
-        tenantScope: { tenantId: req.tenantId },
+        actorId: context.userId,
+        tenantScope: { tenantId: context.tenantId },
         id: postId,
         expectedRevision: parseExpectedRevision(req)
       });
@@ -288,8 +269,8 @@ export function createWhatsNewAdminRouter(
       }
 
       logger.info("whats_new_admin_post_unpublished", {
-        actorId: req.auth.userId,
-        tenantId: req.tenantId,
+        actorId: context.userId,
+        tenantId: context.tenantId,
         postId: post.id
       });
 
