@@ -709,9 +709,9 @@ export class PostgresChangelogRepository implements ChangelogRepository {
         `
           UPDATE changelog_posts
           SET
-            status = $1,
+            status = $1::changelog_post_status,
             published_at = CASE
-              WHEN $1 = 'published' THEN COALESCE(published_at, now())
+              WHEN $1::changelog_post_status = 'published'::changelog_post_status THEN COALESCE(published_at, now())
               ELSE NULL
             END,
             updated_at = now(),
