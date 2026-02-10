@@ -68,16 +68,30 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
 
   const requestedDevEmail = env.WHATS_NEW_DEV_USER_EMAIL?.trim();
   const devAuthBypassUserEmail = requestedDevEmail && requestedDevEmail.length > 0 ? requestedDevEmail : undefined;
+  const devAuthBypassUserId = (env.WHATS_NEW_DEV_USER_ID ?? "dev-admin-1").trim() || "dev-admin-1";
+  const devAuthBypassUserRole = parseUserRole(env.WHATS_NEW_DEV_USER_ROLE, "ADMIN");
 
   const isProduction = (env.NODE_ENV ?? "").toLowerCase() === "production";
   const devBypassDefault = !isProduction;
   const requestedDevBypass = parseBoolean(env.WHATS_NEW_DEV_AUTH_BYPASS, devBypassDefault);
   const devAuthBypassEnabled = !isProduction && requestedDevBypass;
   const allowlistEnabled = parseBoolean(env.WHATS_NEW_ALLOWLIST_ENABLED, true);
+  const publisherAllowlistedUserIds = parseCsvSet(env.WHATS_NEW_PUBLISHER_ALLOWLIST_USER_IDS);
+  const publisherAllowlistedEmails = parseCsvSet(env.WHATS_NEW_PUBLISHER_ALLOWLIST_EMAILS, (item) =>
+    item.toLowerCase()
+  );
 
   // Local browser fallback must still satisfy allowlist middleware.
   if (devAuthBypassEnabled && allowlistEnabled) {
     allowlistedTenantIds.add(devAuthBypassTenantId);
+  }
+
+  // Local browser fallback should satisfy publisher gating in development when bypass user is admin.
+  if (devAuthBypassEnabled && devAuthBypassUserRole === "ADMIN") {
+    publisherAllowlistedUserIds.add(devAuthBypassUserId);
+    if (devAuthBypassUserEmail) {
+      publisherAllowlistedEmails.add(devAuthBypassUserEmail.toLowerCase());
+    }
   }
 
   return {
@@ -85,13 +99,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     whatsNewKillSwitch: parseBoolean(env.WHATS_NEW_KILL_SWITCH, false),
     allowlistEnabled,
     allowlistedTenantIds,
-    publisherAllowlistedUserIds: parseCsvSet(env.WHATS_NEW_PUBLISHER_ALLOWLIST_USER_IDS),
-    publisherAllowlistedEmails: parseCsvSet(env.WHATS_NEW_PUBLISHER_ALLOWLIST_EMAILS, (item) =>
-      item.toLowerCase()
-    ),
+    publisherAllowlistedUserIds,
+    publisherAllowlistedEmails,
     devAuthBypassEnabled,
-    devAuthBypassUserId: (env.WHATS_NEW_DEV_USER_ID ?? "dev-admin-1").trim() || "dev-admin-1",
-    devAuthBypassUserRole: parseUserRole(env.WHATS_NEW_DEV_USER_ROLE, "ADMIN"),
+    devAuthBypassUserId,
+    devAuthBypassUserRole,
     devAuthBypassTenantId,
     devAuthBypassUserEmail
   };

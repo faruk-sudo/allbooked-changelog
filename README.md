@@ -67,6 +67,16 @@ curl -i http://localhost:3000/whats-new \
 - `DATABASE_URL`: PostgreSQL connection string for migrations/seeding/smoke checks
 - `DATABASE_SSL`: `true|false` (default `false`) for DB TLS
 - `DATABASE_SSL_REJECT_UNAUTHORIZED`: `true|false` (default `true`) when TLS is enabled
+- Dev convenience behavior: when `WHATS_NEW_DEV_AUTH_BYPASS=true` and dev role is `ADMIN`, the dev bypass user is auto-added to publisher allowlist at runtime (non-production only).
+
+## Publisher allowlist configuration (MVP)
+- Primary control: `WHATS_NEW_PUBLISHER_ALLOWLIST_USER_IDS`.
+- Fallback only: `WHATS_NEW_PUBLISHER_ALLOWLIST_EMAILS` (exact match, lowercase recommended).
+- Add a publisher: append their stable internal user ID to `WHATS_NEW_PUBLISHER_ALLOWLIST_USER_IDS` (comma-separated).
+- Remove a publisher: remove their user ID from `WHATS_NEW_PUBLISHER_ALLOWLIST_USER_IDS`.
+- Apply changes: restart the service after env changes so config is reloaded.
+- Security note: there is no UI to manage publisher allowlist entries in MVP; configuration is env-only to reduce accidental privilege escalation risk.
+- Commit-safe examples only: never commit real employee emails, tokens, or credentials.
 
 ## Security defaults included
 - Admin-only access enforced server-side on `/whats-new`, `/api/whats-new`, and `/api/admin/whats-new`

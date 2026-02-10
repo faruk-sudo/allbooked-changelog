@@ -116,6 +116,25 @@ Feature component map:
   - purpose: global success/error/warning save feedback.
   - tokens: `--color-success-*`, `--color-danger-*`, `--color-warning-*`, `--radius-md`, `--space-*`.
 
+## What's New Publish/Unpublish Guardrails (Phase 3C)
+
+Publisher edit routes add confirmation + validation guardrails using the same tokenized system (`src/changelog/publisher-routes.ts`, `src/styles/whats-new-admin.css`).
+
+Feature component map:
+
+- `PublishActionGroup` (`.wn-admin-editor-actions`, `#whats-new-editor-publish-button`, `#whats-new-editor-view-link`):
+  - purpose: primary publish/unpublish action, secondary save action, optional reader link.
+  - tokens: `--space-*`, primitive button tokens (`--color-primary-*`, `--color-secondary-*`, `--color-text-*`).
+- `ValidationSummary` (`#whats-new-editor-validation-summary`, `.wn-admin-editor-validation-summary-list`):
+  - purpose: top-of-form summary when multiple field validations fail.
+  - tokens: `--space-*`, `--color-surface-sunken`, `--color-border-default`.
+- `ConfirmDialog` (`#whats-new-editor-confirm-overlay`, `#whats-new-editor-confirm-dialog`):
+  - purpose: required confirmations before publish/unpublish transitions.
+  - tokens: `--z-overlay`, `--shadow-md`, `--color-bg-subtle`, `--color-border-default`, `--space-*`.
+- `StatusPill` (`#whats-new-editor-status-pill`, `.wn-admin-pill--draft|published`):
+  - purpose: immediate state feedback after publish/unpublish actions.
+  - tokens: `--color-warning-*`, `--color-success-*`, `--radius-pill`, `--font-size-xs`.
+
 ## Adding a New Token
 
 1. Add a primitive token in `tokens.json` if the raw value is new.

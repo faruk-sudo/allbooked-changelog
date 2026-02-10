@@ -419,8 +419,9 @@ const LIST_CLIENT_SCRIPT = `(() => {
 const EDITOR_CLIENT_SCRIPT = `(() => {
   const PREVIEW_DEBOUNCE_MS = 300;
   const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-  const SLUG_MAX_LENGTH = 120;
-  const TITLE_MAX_LENGTH = 180;
+  const CATEGORY_VALUES = new Set(["new", "improvement", "fix"]);
+  const SLUG_MAX_LENGTH = 100;
+  const TITLE_MAX_LENGTH = 140;
   const BODY_MAX_LENGTH = 50000;
   const EMPTY_PREVIEW_HTML = '<p class="ds-text ds-text--muted">Nothing to preview yet.</p>';
 
@@ -447,6 +448,7 @@ const EDITOR_CLIENT_SCRIPT = `(() => {
   const visibilityInputEl = document.getElementById("whats-new-editor-visibility");
   const statusInputEl = document.getElementById("whats-new-editor-status");
   const publishedAtInputEl = document.getElementById("whats-new-editor-published-at");
+  const statusPillEl = document.getElementById("whats-new-editor-status-pill");
   const slugInputEl = document.getElementById("whats-new-editor-slug");
   const slugSuggestionEl = document.getElementById("whats-new-editor-slug-suggestion");
   const slugSuggestionButtonEl = document.getElementById("whats-new-editor-slug-suggestion-button");
@@ -455,8 +457,20 @@ const EDITOR_CLIENT_SCRIPT = `(() => {
   const previewStatusEl = document.getElementById("whats-new-editor-preview-status");
   const warningListEl = document.getElementById("whats-new-editor-warning-list");
   const bannerEl = document.getElementById("whats-new-editor-banner");
+  const validationSummaryEl = document.getElementById("whats-new-editor-validation-summary");
+  const validationSummaryListEl = document.getElementById("whats-new-editor-validation-summary-list");
   const saveButtonEl = document.getElementById("whats-new-editor-save-button");
+  const publishButtonEl = document.getElementById("whats-new-editor-publish-button");
+  const viewReaderLinkEl = document.getElementById("whats-new-editor-view-link");
   const saveStatusEl = document.getElementById("whats-new-editor-save-status");
+
+  const confirmOverlayEl = document.getElementById("whats-new-editor-confirm-overlay");
+  const confirmDialogEl = document.getElementById("whats-new-editor-confirm-dialog");
+  const confirmTitleEl = document.getElementById("whats-new-editor-confirm-title");
+  const confirmMessageEl = document.getElementById("whats-new-editor-confirm-message");
+  const confirmWarningEl = document.getElementById("whats-new-editor-confirm-warning");
+  const confirmCancelButtonEl = document.getElementById("whats-new-editor-confirm-cancel");
+  const confirmSubmitButtonEl = document.getElementById("whats-new-editor-confirm-submit");
 
   const titleErrorEl = document.getElementById("whats-new-editor-title-error");
   const categoryErrorEl = document.getElementById("whats-new-editor-category-error");
@@ -471,6 +485,7 @@ const EDITOR_CLIENT_SCRIPT = `(() => {
     !(visibilityInputEl instanceof HTMLInputElement) ||
     !(statusInputEl instanceof HTMLInputElement) ||
     !(publishedAtInputEl instanceof HTMLInputElement) ||
+    !(statusPillEl instanceof HTMLElement) ||
     !(slugInputEl instanceof HTMLInputElement) ||
     !(slugSuggestionEl instanceof HTMLElement) ||
     !(slugSuggestionButtonEl instanceof HTMLButtonElement) ||
@@ -479,8 +494,19 @@ const EDITOR_CLIENT_SCRIPT = `(() => {
     !(previewStatusEl instanceof HTMLElement) ||
     !(warningListEl instanceof HTMLElement) ||
     !(bannerEl instanceof HTMLElement) ||
+    !(validationSummaryEl instanceof HTMLElement) ||
+    !(validationSummaryListEl instanceof HTMLElement) ||
     !(saveButtonEl instanceof HTMLButtonElement) ||
+    !(publishButtonEl instanceof HTMLButtonElement) ||
+    !(viewReaderLinkEl instanceof HTMLAnchorElement) ||
     !(saveStatusEl instanceof HTMLElement) ||
+    !(confirmOverlayEl instanceof HTMLElement) ||
+    !(confirmDialogEl instanceof HTMLElement) ||
+    !(confirmTitleEl instanceof HTMLElement) ||
+    !(confirmMessageEl instanceof HTMLElement) ||
+    !(confirmWarningEl instanceof HTMLElement) ||
+    !(confirmCancelButtonEl instanceof HTMLButtonElement) ||
+    !(confirmSubmitButtonEl instanceof HTMLButtonElement) ||
     !(titleErrorEl instanceof HTMLElement) ||
     !(categoryErrorEl instanceof HTMLElement) ||
     !(slugErrorEl instanceof HTMLElement) ||
@@ -498,12 +524,20 @@ const EDITOR_CLIENT_SCRIPT = `(() => {
     hasUnsavedChanges: false,
     lastSavedSnapshot: "",
     isSubmitting: false,
+    isTransitioning: false,
+    transitionAction: null,
     isLoading: mode === "edit",
     revision: null,
+    status: "draft",
+    publishedAt: null,
+    persistedSlug: "",
     slugManuallyEdited: mode === "edit",
     previewTimer: null,
     previewRequestId: 0,
-    suggestedSlug: null
+    suggestedSlug: null,
+    confirmAction: null,
+    confirmSaveFirst: false,
+    lastFocusedBeforeConfirm: null
   };
 
   const clearElementText = (element) => {
@@ -512,6 +546,75 @@ const EDITOR_CLIENT_SCRIPT = `(() => {
 
   const setElementText = (element, text) => {
     element.textContent = text;
+  };
+
+  const normalizeSlugInput = (value) => value.trim().toLowerCase();
+
+  const slugifyTitle = (value) => {
+    const normalized = value
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/-{2,}/g, "-")
+      .replace(/^-+|-+$/g, "");
+
+    const bounded = normalized.slice(0, SLUG_MAX_LENGTH).replace(/-+$/g, "");
+    if (bounded.length > 0) {
+      return bounded;
+    }
+
+    return "post";
+  };
+
+  const suggestNextSlug = (slug) => {
+    const match = slug.match(/^(.*?)(?:-(\\d+))?$/);
+    const base = (match && match[1] ? match[1] : slug).replace(/-+$/g, "") || "post";
+    const currentNumber = match && match[2] ? Number(match[2]) : 1;
+    const nextSuffix = "-" + String(currentNumber + 1);
+    const maxBaseLength = Math.max(1, SLUG_MAX_LENGTH - nextSuffix.length);
+    const nextBase = base.slice(0, maxBaseLength).replace(/-+$/g, "") || "post".slice(0, maxBaseLength);
+    return nextBase + nextSuffix;
+  };
+
+  const formatTimestamp = (isoValue) => {
+    if (typeof isoValue !== "string" || isoValue.trim().length === 0) {
+      return "Not published";
+    }
+
+    const parsed = new Date(isoValue);
+    if (Number.isNaN(parsed.valueOf())) {
+      return "Not published";
+    }
+
+    return dateFormatter.format(parsed);
+  };
+
+  const getScopeTenantId = () => (scopeSelectEl.value === "global" ? null : tenantId);
+
+  const toSnapshot = () =>
+    JSON.stringify({
+      title: titleInputEl.value,
+      category: categorySelectEl.value,
+      scope: scopeSelectEl.value,
+      slug: slugInputEl.value,
+      body_markdown: bodyInputEl.value
+    });
+
+  const clearValidationSummary = () => {
+    validationSummaryEl.hidden = true;
+    validationSummaryListEl.innerHTML = "";
+  };
+
+  const showValidationSummary = (messages) => {
+    validationSummaryListEl.innerHTML = "";
+
+    for (const message of messages) {
+      const item = document.createElement("li");
+      item.className = "ds-text ds-text--muted";
+      item.textContent = message;
+      validationSummaryListEl.appendChild(item);
+    }
+
+    validationSummaryEl.hidden = false;
   };
 
   const setBanner = (kind, message) => {
@@ -544,60 +647,65 @@ const EDITOR_CLIENT_SCRIPT = `(() => {
       setElementText(titleErrorEl, message);
       return;
     }
+
     if (field === "category") {
       setElementText(categoryErrorEl, message);
       return;
     }
+
     if (field === "slug") {
       setElementText(slugErrorEl, message);
       return;
     }
+
     if (field === "body") {
       setElementText(bodyErrorEl, message);
     }
   };
 
-  const slugifyTitle = (value) => {
-    const normalized = value
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/-{2,}/g, "-")
-      .replace(/^-+|-+$/g, "");
+  const hideSlugSuggestion = () => {
+    state.suggestedSlug = null;
+    slugSuggestionEl.hidden = true;
+    slugSuggestionButtonEl.hidden = true;
+    clearElementText(slugSuggestionEl);
+  };
 
-    const bounded = normalized.slice(0, SLUG_MAX_LENGTH).replace(/-+$/g, "");
-    if (bounded.length > 0) {
-      return bounded;
+  const showSlugSuggestion = (slug) => {
+    state.suggestedSlug = slug;
+    slugSuggestionEl.hidden = false;
+    slugSuggestionButtonEl.hidden = false;
+    setElementText(slugSuggestionEl, "Try suggested slug: " + slug);
+  };
+
+  const setStatusPill = () => {
+    statusPillEl.className =
+      "wn-admin-pill wn-admin-pill--status " +
+      (state.status === "published" ? "wn-admin-pill--published" : "wn-admin-pill--draft");
+    statusPillEl.textContent = state.status === "published" ? "Published" : "Draft";
+  };
+
+  const updateViewReaderLink = () => {
+    const canView = mode === "edit" && state.status === "published" && state.persistedSlug.length > 0;
+    viewReaderLinkEl.hidden = !canView;
+
+    if (canView) {
+      viewReaderLinkEl.href = "/whats-new/" + encodeURIComponent(state.persistedSlug);
     }
-
-    return "post";
   };
-
-  const suggestNextSlug = (slug) => {
-    const match = slug.match(/^(.*?)(?:-(\\d+))?$/);
-    const base = (match && match[1] ? match[1] : slug).replace(/-+$/g, "") || "post";
-    const currentNumber = match && match[2] ? Number(match[2]) : 1;
-    const nextSuffix = "-" + String(currentNumber + 1);
-    const maxBaseLength = Math.max(1, SLUG_MAX_LENGTH - nextSuffix.length);
-    const nextBase = base.slice(0, maxBaseLength).replace(/-+$/g, "") || "post".slice(0, maxBaseLength);
-    return nextBase + nextSuffix;
-  };
-
-  const normalizeSlugInput = (value) => value.trim().toLowerCase();
-
-  const getScopeTenantId = () => (scopeSelectEl.value === "global" ? null : tenantId);
-
-  const toSnapshot = () =>
-    JSON.stringify({
-      title: titleInputEl.value,
-      category: categorySelectEl.value,
-      scope: scopeSelectEl.value,
-      slug: slugInputEl.value,
-      body_markdown: bodyInputEl.value
-    });
 
   const updateSaveStatus = () => {
     if (state.isLoading) {
       setElementText(saveStatusEl, "Loading draft...");
+      return;
+    }
+
+    if (state.isTransitioning) {
+      setElementText(saveStatusEl, state.transitionAction === "publish" ? "Publishing..." : "Unpublishing...");
+      return;
+    }
+
+    if (state.isSubmitting) {
+      setElementText(saveStatusEl, mode === "create" ? "Creating draft..." : "Saving draft...");
       return;
     }
 
@@ -614,9 +722,48 @@ const EDITOR_CLIENT_SCRIPT = `(() => {
     setElementText(saveStatusEl, "All changes saved");
   };
 
+  const updateActionButtons = () => {
+    const isBusy = state.isLoading || state.isSubmitting || state.isTransitioning;
+    saveButtonEl.disabled = isBusy;
+    saveButtonEl.className = mode === "create" ? "ds-button ds-button--primary" : "ds-button ds-button--secondary";
+    saveButtonEl.textContent = state.isSubmitting
+      ? mode === "create"
+        ? "Creating..."
+        : "Saving..."
+      : mode === "create"
+        ? "Create draft"
+        : "Save draft";
+
+    if (mode !== "edit") {
+      publishButtonEl.hidden = true;
+      statusPillEl.hidden = true;
+      updateSaveStatus();
+      return;
+    }
+
+    publishButtonEl.hidden = false;
+    statusPillEl.hidden = false;
+
+    if (state.isTransitioning) {
+      publishButtonEl.disabled = true;
+      publishButtonEl.className =
+        state.transitionAction === "publish" ? "ds-button ds-button--primary" : "ds-button ds-button--secondary";
+      publishButtonEl.textContent = state.transitionAction === "publish" ? "Publishing..." : "Unpublishing...";
+    } else {
+      publishButtonEl.disabled = isBusy;
+      publishButtonEl.className =
+        state.status === "published" ? "ds-button ds-button--secondary" : "ds-button ds-button--primary";
+      publishButtonEl.textContent = state.status === "published" ? "Unpublish" : "Publish";
+    }
+
+    publishButtonEl.dataset.action = state.status === "published" ? "unpublish" : "publish";
+    updateSaveStatus();
+  };
+
   const syncDirtyState = () => {
     state.hasUnsavedChanges = toSnapshot() !== state.lastSavedSnapshot;
-    updateSaveStatus();
+    updateActionButtons();
+    updateViewReaderLink();
   };
 
   const setFormDisabled = (isDisabled) => {
@@ -625,20 +772,7 @@ const EDITOR_CLIENT_SCRIPT = `(() => {
     scopeSelectEl.disabled = isDisabled;
     slugInputEl.disabled = isDisabled;
     bodyInputEl.disabled = isDisabled;
-    saveButtonEl.disabled = isDisabled;
-  };
-
-  const formatTimestamp = (isoValue) => {
-    if (typeof isoValue !== "string" || isoValue.trim().length === 0) {
-      return "Not published";
-    }
-
-    const parsed = new Date(isoValue);
-    if (Number.isNaN(parsed.valueOf())) {
-      return "Not published";
-    }
-
-    return dateFormatter.format(parsed);
+    updateActionButtons();
   };
 
   const applyWarnings = () => {
@@ -664,20 +798,6 @@ const EDITOR_CLIENT_SCRIPT = `(() => {
     }
 
     warningListEl.hidden = false;
-  };
-
-  const hideSlugSuggestion = () => {
-    state.suggestedSlug = null;
-    slugSuggestionEl.hidden = true;
-    slugSuggestionButtonEl.hidden = true;
-    clearElementText(slugSuggestionEl);
-  };
-
-  const showSlugSuggestion = (slug) => {
-    state.suggestedSlug = slug;
-    slugSuggestionEl.hidden = false;
-    slugSuggestionButtonEl.hidden = false;
-    setElementText(slugSuggestionEl, "Try suggested slug: " + slug);
   };
 
   const renderPreview = async () => {
@@ -744,44 +864,84 @@ const EDITOR_CLIENT_SCRIPT = `(() => {
     return slugifyTitle(titleInputEl.value);
   };
 
-  const validateBeforeSave = () => {
+  const validateForm = (options) => {
     clearFieldErrors();
+    clearValidationSummary();
     hideSlugSuggestion();
 
-    if (titleInputEl.value.length > TITLE_MAX_LENGTH) {
-      setFieldError("title", "Title must be " + String(TITLE_MAX_LENGTH) + " characters or less.");
-      return null;
+    const requirePublishFields = Boolean(options && options.requirePublishFields);
+    const summaryMessages = [];
+
+    const titleRaw = titleInputEl.value;
+    const title = titleRaw.trim();
+    if (titleRaw.length > TITLE_MAX_LENGTH) {
+      const message = "Title must be " + String(TITLE_MAX_LENGTH) + " characters or less.";
+      setFieldError("title", message);
+      summaryMessages.push(message);
+    } else if (requirePublishFields && title.length === 0) {
+      const message = "Title is required before publishing.";
+      setFieldError("title", message);
+      summaryMessages.push(message);
     }
 
-    if (bodyInputEl.value.length > BODY_MAX_LENGTH) {
-      setFieldError("body", "Body must be " + String(BODY_MAX_LENGTH) + " characters or less.");
-      return null;
+    const category = categorySelectEl.value;
+    if (!CATEGORY_VALUES.has(category)) {
+      const message = "Category must be New, Improvement, or Fix.";
+      setFieldError("category", message);
+      summaryMessages.push(message);
+    }
+
+    const bodyMarkdown = bodyInputEl.value;
+    if (bodyMarkdown.length > BODY_MAX_LENGTH) {
+      const message = "Body must be " + String(BODY_MAX_LENGTH) + " characters or less.";
+      setFieldError("body", message);
+      summaryMessages.push(message);
+    } else if (requirePublishFields && bodyMarkdown.trim().length === 0) {
+      const message = "Body markdown is required before publishing.";
+      setFieldError("body", message);
+      summaryMessages.push(message);
     }
 
     const slug = resolveEffectiveSlug();
     if (slug.length > SLUG_MAX_LENGTH) {
-      setFieldError("slug", "Slug must be " + String(SLUG_MAX_LENGTH) + " characters or less.");
-      return null;
+      const message = "Slug must be " + String(SLUG_MAX_LENGTH) + " characters or less.";
+      setFieldError("slug", message);
+      summaryMessages.push(message);
+    } else if (!SLUG_PATTERN.test(slug)) {
+      const message = "Slug must use lowercase letters, numbers, and hyphens only.";
+      setFieldError("slug", message);
+      summaryMessages.push(message);
     }
 
-    if (!SLUG_PATTERN.test(slug)) {
-      setFieldError("slug", "Slug must use lowercase letters, numbers, and hyphens only.");
-      return null;
+    if (summaryMessages.length > 1) {
+      showValidationSummary(summaryMessages);
     }
 
-    const category = categorySelectEl.value;
-    if (!category) {
-      setFieldError("category", "Category is required.");
+    if (summaryMessages.length > 0) {
       return null;
     }
 
     return {
-      title: titleInputEl.value.trim(),
+      title,
       slug,
       category,
       tenant_id: getScopeTenantId(),
-      body_markdown: bodyInputEl.value
+      body_markdown: bodyMarkdown
     };
+  };
+
+  const applyPostMeta = (post) => {
+    const nextStatus = post.status === "published" ? "published" : "draft";
+    state.status = nextStatus;
+    state.publishedAt = typeof post.published_at === "string" ? post.published_at : null;
+    state.revision = typeof post.revision === "number" ? post.revision : state.revision;
+    state.persistedSlug = typeof post.slug === "string" ? normalizeSlugInput(post.slug) : state.persistedSlug;
+
+    statusInputEl.value = nextStatus === "published" ? "Published" : "Draft";
+    publishedAtInputEl.value = formatTimestamp(state.publishedAt);
+    setStatusPill();
+    updateViewReaderLink();
+    updateActionButtons();
   };
 
   const applyPostToForm = (post) => {
@@ -792,120 +952,130 @@ const EDITOR_CLIENT_SCRIPT = `(() => {
     slugInputEl.value = typeof post.slug === "string" ? post.slug : "";
     bodyInputEl.value = typeof post.body_markdown === "string" ? post.body_markdown : "";
     visibilityInputEl.value = post.visibility === "authenticated" ? "Authenticated (locked for v1)" : "Authenticated";
-    statusInputEl.value = post.status === "published" ? "Published" : "Draft";
-    publishedAtInputEl.value = formatTimestamp(post.published_at);
-    state.revision = typeof post.revision === "number" ? post.revision : null;
     state.slugManuallyEdited = true;
+    applyPostMeta(post);
     applyWarnings();
     void renderPreview();
   };
 
-  const loadPost = async () => {
-    if (mode !== "edit") {
-      state.isLoading = false;
-      visibilityInputEl.value = "Authenticated (locked for v1)";
-      statusInputEl.value = "Draft";
-      publishedAtInputEl.value = "Not published";
-      previewPaneEl.innerHTML = EMPTY_PREVIEW_HTML;
-      state.lastSavedSnapshot = toSnapshot();
-      syncDirtyState();
-      return;
-    }
-
-    if (!postId) {
-      setBanner("error", "Missing post id.");
-      setFormDisabled(true);
-      return;
-    }
-
-    setFormDisabled(true);
-    updateSaveStatus();
-
+  const parseErrorMessage = async (response) => {
     try {
-      const response = await fetch("/api/admin/whats-new/posts/" + encodeURIComponent(postId), {
-        headers
-      });
-
-      if (!response.ok) {
-        state.isLoading = false;
-        updateSaveStatus();
-        if (response.status === 404) {
-          setBanner("error", "Post not found.");
-        } else {
-          setBanner("error", "Unable to load draft.");
-        }
-        setFormDisabled(true);
-        return;
-      }
-
       const payload = await response.json();
-      applyPostToForm(payload);
-      state.lastSavedSnapshot = toSnapshot();
-      state.hasUnsavedChanges = false;
-      state.isLoading = false;
-      updateSaveStatus();
-      setFormDisabled(false);
+      return typeof payload.error === "string" ? payload.error : "";
     } catch {
-      state.isLoading = false;
-      updateSaveStatus();
-      setBanner("error", "Unable to load draft.");
-      setFormDisabled(true);
+      return "";
     }
   };
 
-  const handleSaveError = async (response) => {
-    let message = "";
-    try {
-      const payload = await response.json();
-      message = typeof payload.error === "string" ? payload.error : "";
-    } catch {
-      message = "";
+  const applyServerValidationMessage = (message) => {
+    if (!message) {
+      return false;
     }
 
-    if (response.status === 409 && message.toLowerCase().includes("slug")) {
-      const suggestion = suggestNextSlug(resolveEffectiveSlug());
-      setFieldError("slug", "Slug already exists.");
-      showSlugSuggestion(suggestion);
-      setBanner("error", "Draft was not saved.");
-      return;
+    const lower = message.toLowerCase();
+    const summaryMessages = [];
+    let mapped = false;
+
+    const addFieldMessage = (field, fieldMessage) => {
+      mapped = true;
+      setFieldError(field, fieldMessage);
+      summaryMessages.push(fieldMessage);
+    };
+
+    if (lower.includes("title and body_markdown are required")) {
+      addFieldMessage("title", "Title is required before publishing.");
+      addFieldMessage("body", "Body markdown is required before publishing.");
+    } else {
+      if (lower.includes("title")) {
+        addFieldMessage("title", message);
+      }
+
+      if (lower.includes("body_markdown")) {
+        addFieldMessage("body", message);
+      }
+
+      if (lower.includes("slug")) {
+        addFieldMessage("slug", message);
+      }
+
+      if (lower.includes("category")) {
+        addFieldMessage("category", message);
+      }
     }
+
+    if (summaryMessages.length > 1) {
+      showValidationSummary(summaryMessages);
+    }
+
+    return mapped;
+  };
+
+  const applySlugConflictFeedback = () => {
+    const suggestion = suggestNextSlug(resolveEffectiveSlug());
+    setFieldError("slug", "Slug already in use.");
+    showSlugSuggestion(suggestion);
+    clearValidationSummary();
+  };
+
+  const handleRequestError = async (response, options) => {
+    const message = await parseErrorMessage(response);
+    const lower = message.toLowerCase();
 
     if (response.status === 400) {
-      const lower = message.toLowerCase();
-      if (lower.includes("slug")) {
-        setFieldError("slug", message);
-      } else if (lower.includes("title")) {
-        setFieldError("title", message);
-      } else if (lower.includes("body_markdown")) {
-        setFieldError("body", message);
-      } else if (lower.includes("category")) {
-        setFieldError("category", message);
-      } else {
+      clearFieldErrors();
+      clearValidationSummary();
+      hideSlugSuggestion();
+      if (!applyServerValidationMessage(message)) {
         setBanner("error", "Validation failed. Please review the form.");
       }
-      return;
+      return false;
     }
 
-    if (response.status === 403 || response.status === 404) {
+    if (response.status === 409) {
+      if (lower.includes("slug")) {
+        applySlugConflictFeedback();
+        setBanner("error", options && options.intent === "publish" ? "Publish failed. Update the slug and retry." : "Draft was not saved.");
+        return false;
+      }
+
+      if (lower.includes("revision")) {
+        setBanner("error", "This post changed elsewhere. Refresh and try again.");
+        return false;
+      }
+
+      setBanner("error", "Unable to complete this action right now. Refresh and retry.");
+      return false;
+    }
+
+    if (response.status === 401 || response.status === 403) {
       setBanner("error", "You do not have access to this action.");
-      return;
+      return false;
     }
 
-    setBanner("error", "Unable to save draft. Please retry.");
+    if (response.status === 404) {
+      setBanner("error", "Post not found.");
+      return false;
+    }
+
+    if (response.status >= 500) {
+      setBanner("error", "Something went wrong. Try again.");
+      return false;
+    }
+
+    setBanner("error", "Unable to complete this action. Try again.");
+    return false;
   };
 
-  const saveDraft = async () => {
-    const payload = validateBeforeSave();
+  const saveDraftInternal = async (options) => {
+    const payload = validateForm({ requirePublishFields: false });
     if (!payload) {
-      return;
+      return null;
     }
 
     slugInputEl.value = payload.slug;
     clearBanner();
     state.isSubmitting = true;
-    saveButtonEl.disabled = true;
-    saveButtonEl.textContent = mode === "create" ? "Creating..." : "Saving...";
-    updateSaveStatus();
+    updateActionButtons();
 
     try {
       const requestBody = {
@@ -928,14 +1098,14 @@ const EDITOR_CLIENT_SCRIPT = `(() => {
         });
 
         if (!createResponse.ok) {
-          await handleSaveError(createResponse);
-          return;
+          await handleRequestError(createResponse, { intent: "save" });
+          return null;
         }
 
         const created = await createResponse.json();
         const nextUrl = "/admin/whats-new/" + encodeURIComponent(String(created.id || "")) + "/edit";
         window.location.assign(nextUrl);
-        return;
+        return null;
       }
 
       const updateResponse = await fetch("/api/admin/whats-new/posts/" + encodeURIComponent(postId), {
@@ -952,25 +1122,213 @@ const EDITOR_CLIENT_SCRIPT = `(() => {
       });
 
       if (!updateResponse.ok) {
-        await handleSaveError(updateResponse);
-        return;
+        await handleRequestError(updateResponse, { intent: "save" });
+        return null;
       }
 
       const updated = await updateResponse.json();
-      statusInputEl.value = updated.status === "published" ? "Published" : "Draft";
-      publishedAtInputEl.value = formatTimestamp(updated.published_at);
-      state.revision = typeof updated.revision === "number" ? updated.revision : state.revision;
+      applyPostMeta(updated);
       state.lastSavedSnapshot = toSnapshot();
       state.hasUnsavedChanges = false;
       applyWarnings();
-      setBanner("success", "Draft saved.");
-      updateSaveStatus();
+      if (!options || options.showSuccessBanner !== false) {
+        setBanner("success", "Draft saved.");
+      }
+      updateActionButtons();
+      return updated;
     } catch {
       setBanner("error", "Unable to save draft. Please retry.");
+      return null;
     } finally {
       state.isSubmitting = false;
-      saveButtonEl.disabled = false;
-      saveButtonEl.textContent = mode === "create" ? "Create draft" : "Save draft";
+      updateActionButtons();
+    }
+  };
+
+  const closeConfirmDialog = () => {
+    state.confirmAction = null;
+    state.confirmSaveFirst = false;
+    confirmOverlayEl.hidden = true;
+    confirmSubmitButtonEl.disabled = false;
+    confirmCancelButtonEl.disabled = false;
+    document.body.classList.remove("wn-admin-dialog-open");
+
+    if (state.lastFocusedBeforeConfirm instanceof HTMLElement) {
+      state.lastFocusedBeforeConfirm.focus();
+    }
+  };
+
+  const openConfirmDialog = (options) => {
+    state.confirmAction = options.action;
+    state.confirmSaveFirst = Boolean(options.saveFirst);
+    state.lastFocusedBeforeConfirm = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+
+    setElementText(confirmTitleEl, options.title);
+    setElementText(confirmMessageEl, options.message);
+    setElementText(confirmWarningEl, options.warning || "");
+    confirmWarningEl.hidden = !options.warning;
+
+    confirmSubmitButtonEl.className =
+      options.action === "publish" ? "ds-button ds-button--primary" : "ds-button ds-button--secondary";
+    setElementText(confirmSubmitButtonEl, options.confirmLabel);
+
+    confirmOverlayEl.hidden = false;
+    document.body.classList.add("wn-admin-dialog-open");
+    confirmCancelButtonEl.focus();
+  };
+
+  const requestStatusTransition = async (action, saveFirst) => {
+    if (mode !== "edit" || !postId || state.isLoading || state.isSubmitting || state.isTransitioning) {
+      return;
+    }
+
+    clearBanner();
+    state.isTransitioning = true;
+    state.transitionAction = action;
+    updateActionButtons();
+
+    try {
+      if (action === "publish") {
+        const publishValidation = validateForm({ requirePublishFields: true });
+        if (!publishValidation) {
+          return;
+        }
+        slugInputEl.value = publishValidation.slug;
+
+        if (saveFirst) {
+          const saved = await saveDraftInternal({ showSuccessBanner: false });
+          if (!saved) {
+            setBanner("error", "Unable to publish until draft changes are saved.");
+            return;
+          }
+        }
+      }
+
+      const transitionResponse = await fetch(
+        "/api/admin/whats-new/posts/" + encodeURIComponent(postId) + "/" + (action === "publish" ? "publish" : "unpublish"),
+        {
+          method: "POST",
+          headers: {
+            ...headers,
+            "x-csrf-token": csrfToken,
+            "content-type": "application/json"
+          },
+          body: JSON.stringify({
+            expected_revision: state.revision
+          })
+        }
+      );
+
+      if (!transitionResponse.ok) {
+        await handleRequestError(transitionResponse, { intent: action });
+        return;
+      }
+
+      const updated = await transitionResponse.json();
+      applyPostMeta(updated);
+      setBanner("success", action === "publish" ? "Published." : "Unpublished.");
+    } catch {
+      setBanner("error", "Something went wrong. Try again.");
+    } finally {
+      state.isTransitioning = false;
+      state.transitionAction = null;
+      updateActionButtons();
+    }
+  };
+
+  const promptForStatusTransition = () => {
+    if (mode !== "edit") {
+      return;
+    }
+
+    const action = state.status === "published" ? "unpublish" : "publish";
+
+    if (action === "publish") {
+      const validation = validateForm({ requirePublishFields: true });
+      if (!validation) {
+        setBanner("error", "Cannot publish until required fields are fixed.");
+        return;
+      }
+
+      const hasGlobalScope = scopeSelectEl.value === "global";
+      const saveFirst = state.hasUnsavedChanges;
+      openConfirmDialog({
+        action,
+        saveFirst,
+        title: saveFirst ? "Save and publish this post?" : "Publish this post?",
+        message:
+          "Visible to authenticated admins in allowlisted tenants." +
+          (saveFirst ? " We will save your latest edits first." : ""),
+        warning: hasGlobalScope ? "Global update will appear for all allowlisted tenants." : "",
+        confirmLabel: saveFirst ? "Save & Publish" : "Publish"
+      });
+      return;
+    }
+
+    openConfirmDialog({
+      action,
+      saveFirst: false,
+      title: "Unpublish this post?",
+      message: "This moves the post back to draft and can remove visibility for readers.",
+      warning: "",
+      confirmLabel: "Unpublish"
+    });
+  };
+
+  const loadPost = async () => {
+    if (mode !== "edit") {
+      state.isLoading = false;
+      visibilityInputEl.value = "Authenticated (locked for v1)";
+      state.status = "draft";
+      state.publishedAt = null;
+      statusInputEl.value = "Draft";
+      publishedAtInputEl.value = "Not published";
+      previewPaneEl.innerHTML = EMPTY_PREVIEW_HTML;
+      state.lastSavedSnapshot = toSnapshot();
+      syncDirtyState();
+      setStatusPill();
+      updateActionButtons();
+      return;
+    }
+
+    if (!postId) {
+      setBanner("error", "Missing post id.");
+      setFormDisabled(true);
+      return;
+    }
+
+    setFormDisabled(true);
+    updateActionButtons();
+
+    try {
+      const response = await fetch("/api/admin/whats-new/posts/" + encodeURIComponent(postId), {
+        headers
+      });
+
+      if (!response.ok) {
+        state.isLoading = false;
+        updateActionButtons();
+        if (response.status === 404) {
+          setBanner("error", "Post not found.");
+        } else {
+          setBanner("error", "Unable to load draft.");
+        }
+        setFormDisabled(true);
+        return;
+      }
+
+      const payload = await response.json();
+      applyPostToForm(payload);
+      state.lastSavedSnapshot = toSnapshot();
+      state.hasUnsavedChanges = false;
+      state.isLoading = false;
+      updateActionButtons();
+      setFormDisabled(false);
+    } catch {
+      state.isLoading = false;
+      updateActionButtons();
+      setBanner("error", "Unable to load draft.");
+      setFormDisabled(true);
     }
   };
 
@@ -985,12 +1343,15 @@ const EDITOR_CLIENT_SCRIPT = `(() => {
   titleInputEl.addEventListener("input", () => {
     applyAutoSlugFromTitle();
     applyWarnings();
+    clearElementText(titleErrorEl);
+    clearValidationSummary();
     syncDirtyState();
   });
 
   categorySelectEl.addEventListener("change", () => {
-    syncDirtyState();
     clearElementText(categoryErrorEl);
+    clearValidationSummary();
+    syncDirtyState();
   });
 
   scopeSelectEl.addEventListener("change", () => {
@@ -1001,6 +1362,7 @@ const EDITOR_CLIENT_SCRIPT = `(() => {
     state.slugManuallyEdited = true;
     hideSlugSuggestion();
     clearElementText(slugErrorEl);
+    clearValidationSummary();
     syncDirtyState();
   });
 
@@ -1019,6 +1381,7 @@ const EDITOR_CLIENT_SCRIPT = `(() => {
     applyWarnings();
     schedulePreview();
     clearElementText(bodyErrorEl);
+    clearValidationSummary();
     syncDirtyState();
   });
 
@@ -1033,9 +1396,40 @@ const EDITOR_CLIENT_SCRIPT = `(() => {
     syncDirtyState();
   });
 
+  publishButtonEl.addEventListener("click", (event) => {
+    event.preventDefault();
+    promptForStatusTransition();
+  });
+
+  confirmCancelButtonEl.addEventListener("click", () => {
+    closeConfirmDialog();
+  });
+
+  confirmSubmitButtonEl.addEventListener("click", () => {
+    const action = state.confirmAction;
+    const saveFirst = state.confirmSaveFirst;
+    closeConfirmDialog();
+    if (!action) {
+      return;
+    }
+    void requestStatusTransition(action, saveFirst);
+  });
+
+  confirmOverlayEl.addEventListener("click", (event) => {
+    if (event.target === confirmOverlayEl) {
+      closeConfirmDialog();
+    }
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !confirmOverlayEl.hidden) {
+      closeConfirmDialog();
+    }
+  });
+
   formEl.addEventListener("submit", (event) => {
     event.preventDefault();
-    void saveDraft();
+    void saveDraftInternal({ showSuccessBanner: true });
   });
 
   window.addEventListener("beforeunload", (event) => {
@@ -1066,9 +1460,12 @@ const EDITOR_CLIENT_SCRIPT = `(() => {
     }
   });
 
-  saveButtonEl.textContent = mode === "create" ? "Create draft" : "Save draft";
   hideSlugSuggestion();
+  clearValidationSummary();
   applyWarnings();
+  setStatusPill();
+  updateActionButtons();
+  updateViewReaderLink();
   void loadPost();
 })();`;
 
@@ -1230,6 +1627,15 @@ function renderEditorPage(
         </div>
 
         <p id="whats-new-editor-banner" class="wn-admin-editor-banner ds-text" hidden></p>
+        <section
+          id="whats-new-editor-validation-summary"
+          class="wn-admin-editor-validation-summary ds-surface ds-surface--sunken"
+          aria-label="Validation summary"
+          hidden
+        >
+          <p class="ds-text ds-text--body">Fix the following before continuing:</p>
+          <ul id="whats-new-editor-validation-summary-list" class="wn-admin-editor-validation-summary-list"></ul>
+        </section>
         <ul id="whats-new-editor-warning-list" class="wn-admin-editor-warning-list ds-surface ds-surface--sunken" hidden></ul>
 
         <form id="whats-new-editor-form" class="wn-admin-editor-form">
@@ -1241,7 +1647,7 @@ function renderEditorPage(
                 class="wn-admin-input"
                 name="title"
                 type="text"
-                maxlength="180"
+                maxlength="140"
                 autocomplete="off"
                 placeholder="Release title"
               />
@@ -1292,6 +1698,9 @@ function renderEditorPage(
                 readonly
                 aria-readonly="true"
               />
+              <span id="whats-new-editor-status-pill" class="wn-admin-pill wn-admin-pill--status wn-admin-pill--draft">
+                Draft
+              </span>
             </div>
 
             <div class="wn-admin-field">
@@ -1315,7 +1724,7 @@ function renderEditorPage(
               class="wn-admin-input"
               name="slug"
               type="text"
-              maxlength="120"
+              maxlength="100"
               autocomplete="off"
               placeholder="auto-generated-from-title"
             />
@@ -1358,7 +1767,25 @@ function renderEditorPage(
           </div>
 
           <div class="wn-admin-editor-actions">
-            <button id="whats-new-editor-save-button" class="ds-button ds-button--primary" type="submit">Save draft</button>
+            <a
+              id="whats-new-editor-view-link"
+              class="ds-button ds-button--ghost"
+              href="#"
+              target="_blank"
+              rel="noopener noreferrer"
+              hidden
+            >
+              View in reader
+            </a>
+            <button id="whats-new-editor-save-button" class="ds-button ds-button--secondary" type="submit">Save draft</button>
+            <button
+              id="whats-new-editor-publish-button"
+              class="ds-button ds-button--primary"
+              type="button"
+              ${mode === "edit" ? "" : "hidden"}
+            >
+              Publish
+            </button>
           </div>
         </form>
       </section>
@@ -1373,6 +1800,26 @@ function renderEditorPage(
       data-tenant-id="${escapeHtml(tenantId)}"
       data-csrf-token="${DEFAULT_CSRF_TOKEN}"
     ></div>
+
+    <div id="whats-new-editor-confirm-overlay" class="wn-admin-confirm-overlay" hidden>
+      <section
+        id="whats-new-editor-confirm-dialog"
+        class="wn-admin-confirm-dialog ds-surface ds-surface--raised"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="whats-new-editor-confirm-title"
+      >
+        <div class="wn-admin-confirm-dialog__content">
+          <h2 id="whats-new-editor-confirm-title" class="ds-text ds-text--heading">Confirm action</h2>
+          <p id="whats-new-editor-confirm-message" class="ds-text ds-text--body"></p>
+          <p id="whats-new-editor-confirm-warning" class="ds-text ds-text--muted" hidden></p>
+        </div>
+        <div class="wn-admin-confirm-dialog__actions">
+          <button id="whats-new-editor-confirm-cancel" class="ds-button ds-button--ghost" type="button">Cancel</button>
+          <button id="whats-new-editor-confirm-submit" class="ds-button ds-button--primary" type="button">Confirm</button>
+        </div>
+      </section>
+    </div>
 
     <script src="/admin/whats-new/assets/editor-client.js" defer></script>
   </body>

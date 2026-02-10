@@ -282,3 +282,25 @@ No PII payloads should be added when instrumentation is implemented.
 - `EditorBanner` (`.wn-admin-editor-banner--success|error|warning`)
 
 All styling remains token-driven via semantic variables (`--color-*`, `--space-*`, `--radius-*`, `--font-*`) in `src/styles/whats-new-admin.css`.
+
+## Phase 3C (3.3 + 3.4 + 3.5 docs) publish/unpublish guardrails
+
+### Decisions
+
+1. Implemented publish/unpublish actions only on the edit route (`/admin/whats-new/:id/edit`) for the safest MVP surface area; list rows continue to route users into edit.
+2. Added required confirmation dialog before status transitions:
+   - publish confirmation includes audience context
+   - global-scope drafts show stronger global warning
+   - unpublish confirmation clarifies that visibility is removed and status returns to draft
+3. Chose explicit `Save & Publish` sequencing when unsaved edits exist, rather than auto-publishing stale server state.
+4. Added client-side publish guardrails with field + summary errors:
+   - required on publish: `title`, `category`, `body_markdown`, valid `slug`
+   - max lengths: `title <= 140`, `slug <= 100`, `body_markdown <= 50_000`
+5. Added safe error mapping in the editor client:
+   - `400` -> field/bucketed validation messages
+   - `401/403` -> safe access message
+   - `404` -> not found
+   - `409` slug conflict -> inline slug error + one-click suggestion
+   - `5xx` -> generic retry message
+6. Kept server-side authorization/tenant/CSRF guards unchanged and added minimal failure telemetry in admin routes (`route`, `actorId`, `tenantId`, `postId`, `statusCode`, `errorType`) without request bodies or markdown content.
+7. Documented publisher allowlist operations as env-only (no UI management in MVP) in `README.md` and `.env.example` comments.

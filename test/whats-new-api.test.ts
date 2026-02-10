@@ -741,6 +741,36 @@ describe("What's New admin API", () => {
     expect(String(publishResponse.body.error || "")).toContain("required");
   });
 
+  it("enforces title and slug max lengths on draft save", async () => {
+    const repo = new InMemoryChangelogRepository();
+    const app = createApp(createConfig(), { changelogRepository: repo });
+
+    const longTitleResponse = await withAdminHeaders(
+      request(app).post("/api/admin/whats-new/posts").set("x-csrf-token", csrfToken),
+      { userId: "publisher-1" }
+    ).send({
+      category: "new",
+      title: "t".repeat(141),
+      body_markdown: "Body"
+    });
+
+    expect(longTitleResponse.status).toBe(400);
+    expect(String(longTitleResponse.body.error || "")).toContain("140");
+
+    const longSlugResponse = await withAdminHeaders(
+      request(app).post("/api/admin/whats-new/posts").set("x-csrf-token", csrfToken),
+      { userId: "publisher-1" }
+    ).send({
+      category: "new",
+      title: "Valid title",
+      slug: "s".repeat(101),
+      body_markdown: "Body"
+    });
+
+    expect(longSlugResponse.status).toBe(400);
+    expect(String(longSlugResponse.body.error || "")).toContain("100");
+  });
+
   it("returns 409 for slug conflicts on update", async () => {
     const repo = new InMemoryChangelogRepository([
       {

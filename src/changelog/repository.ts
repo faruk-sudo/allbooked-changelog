@@ -6,10 +6,10 @@ export type ChangelogPostStatus = "draft" | "published";
 export type ChangelogPostCategory = "new" | "improvement" | "fix";
 export type ChangelogAuditAction = "create" | "update" | "publish" | "unpublish" | "delete";
 
-export const TITLE_MAX_LENGTH = 180;
+export const TITLE_MAX_LENGTH = 140;
 export const BODY_MAX_LENGTH = 50_000;
 export const EXCERPT_MAX_LENGTH = 220;
-export const SLUG_MAX_LENGTH = 120;
+export const SLUG_MAX_LENGTH = 100;
 
 const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const CATEGORY_VALUES = new Set<ChangelogPostCategory>(["new", "improvement", "fix"]);

@@ -2,6 +2,7 @@ import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { createApp } from "../src/app";
 import type { AppConfig } from "../src/config";
+import { loadConfig } from "../src/config";
 import { InMemoryChangelogRepository } from "../src/changelog/repository";
 
 function createConfig(overrides: Partial<AppConfig> = {}): AppConfig {
@@ -94,13 +95,51 @@ describe("What's New publisher admin route", () => {
     expect(createResponse.text).toContain("Create draft");
     expect(createResponse.text).toContain('id="whats-new-editor-form"');
     expect(createResponse.text).toContain('id="whats-new-editor-preview"');
+    expect(createResponse.text).toContain('id="whats-new-editor-save-button"');
+    expect(createResponse.text).toContain('id="whats-new-editor-publish-button"');
+    expect(createResponse.text).toContain('id="whats-new-editor-validation-summary"');
 
     const editResponse = await withHeaders(request(app).get("/admin/whats-new/post-123/edit"));
     expect(editResponse.status).toBe(200);
     expect(editResponse.text).toContain("Edit draft");
     expect(editResponse.text).toContain('data-mode="edit"');
+    expect(editResponse.text).toContain('id="whats-new-editor-status-pill"');
+    expect(editResponse.text).toContain('id="whats-new-editor-view-link"');
+    expect(editResponse.text).toContain('id="whats-new-editor-confirm-dialog"');
+    expect(editResponse.text).toContain('id="whats-new-editor-confirm-submit"');
 
     const missingEditResponse = await withHeaders(request(app).get("/admin/whats-new/missing/edit"));
     expect(missingEditResponse.status).toBe(404);
+  });
+
+  it("serves editor client script with publish confirmation and slug-conflict handling hooks", async () => {
+    const app = createApp(createConfig(), { changelogRepository: new InMemoryChangelogRepository() });
+    const response = await withHeaders(request(app).get("/admin/whats-new/assets/editor-client.js"));
+
+    expect(response.status).toBe(200);
+    expect(response.text).toContain("openConfirmDialog");
+    expect(response.text).toContain("Save & Publish");
+    expect(response.text).toContain("Slug already in use.");
+    expect(response.text).toContain("Try suggested slug:");
+  });
+
+  it("supports browser access to /admin/whats-new with dev auth bypass and no explicit publisher allowlist", async () => {
+    const config = loadConfig({
+      NODE_ENV: "development",
+      WHATS_NEW_ALLOWLIST_ENABLED: "true",
+      WHATS_NEW_ALLOWLIST_TENANT_IDS: "tenant-alpha",
+      WHATS_NEW_DEV_AUTH_BYPASS: "true",
+      WHATS_NEW_DEV_USER_ID: "dev-admin-local",
+      WHATS_NEW_DEV_USER_ROLE: "ADMIN",
+      WHATS_NEW_DEV_TENANT_ID: "tenant-alpha",
+      WHATS_NEW_PUBLISHER_ALLOWLIST_USER_IDS: "",
+      WHATS_NEW_PUBLISHER_ALLOWLIST_EMAILS: ""
+    });
+
+    const app = createApp(config, { changelogRepository: new InMemoryChangelogRepository() });
+    const response = await request(app).get("/admin/whats-new");
+
+    expect(response.status).toBe(200);
+    expect(response.text).toContain("What's New Publisher");
   });
 });

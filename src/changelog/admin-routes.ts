@@ -117,17 +117,37 @@ function toAdminDetailResponse(post: {
   };
 }
 
-function handleAdminError(res: Response, error: unknown): void {
+function handleAdminError(
+  res: Response,
+  error: unknown,
+  logger: Logger,
+  metadata: { route: string; actorId?: string; tenantId?: string; postId?: string }
+): void {
   if (error instanceof ValidationError) {
+    logger.info("whats_new_admin_request_failed", {
+      ...metadata,
+      statusCode: 400,
+      errorType: "validation"
+    });
     res.status(400).json({ error: error.message });
     return;
   }
 
   if (error instanceof ConflictError) {
+    logger.info("whats_new_admin_request_failed", {
+      ...metadata,
+      statusCode: 409,
+      errorType: "conflict"
+    });
     res.status(409).json({ error: error.message });
     return;
   }
 
+  logger.info("whats_new_admin_request_failed", {
+    ...metadata,
+    statusCode: 500,
+    errorType: "internal"
+  });
   res.status(500).json({ error: "Internal server error" });
 }
 
@@ -140,8 +160,13 @@ export function createWhatsNewAdminRouter(
   applyWhatsNewAdminGuards(router, config);
 
   router.get("/posts", async (req: Request, res: Response) => {
+    let actorId: string | undefined;
+    let tenantId: string | undefined;
+
     try {
       const context = getGuardedWhatsNewContext(req);
+      actorId = context.userId;
+      tenantId = context.tenantId;
       const pagination = parsePagination(req);
       const status = parseOptionalStatusFilter(req);
       const tenantFilter = parseAdminTenantFilter(req);
@@ -177,13 +202,22 @@ export function createWhatsNewAdminRouter(
         }
       });
     } catch (error) {
-      handleAdminError(res, error);
+      handleAdminError(res, error, logger, {
+        route: "list_posts",
+        actorId,
+        tenantId
+      });
     }
   });
 
   router.post("/posts", async (req: Request, res: Response) => {
+    let actorId: string | undefined;
+    let tenantId: string | undefined;
+
     try {
       const context = getGuardedWhatsNewContext(req);
+      actorId = context.userId;
+      tenantId = context.tenantId;
       const body = (req.body ?? {}) as CreatePostBody;
       const title = normalizeOptionalString("title", body.title);
       const bodyMarkdown = normalizeOptionalString("body_markdown", body.body_markdown);
@@ -213,15 +247,24 @@ export function createWhatsNewAdminRouter(
 
       res.status(201).json(toAdminResponse(createdPost));
     } catch (error) {
-      handleAdminError(res, error);
+      handleAdminError(res, error, logger, {
+        route: "create_post",
+        actorId,
+        tenantId
+      });
     }
   });
 
   router.put("/posts/:id", async (req: Request, res: Response) => {
+    let actorId: string | undefined;
+    let tenantId: string | undefined;
+    const idParam = req.params.id;
+    const postId = Array.isArray(idParam) ? idParam[0] ?? "" : idParam ?? "";
+
     try {
       const context = getGuardedWhatsNewContext(req);
-      const idParam = req.params.id;
-      const postId = Array.isArray(idParam) ? idParam[0] ?? "" : idParam ?? "";
+      actorId = context.userId;
+      tenantId = context.tenantId;
       const body = (req.body ?? {}) as UpdatePostBody;
       const slugValue = normalizeOptionalString("slug", body.slug);
 
@@ -256,15 +299,25 @@ export function createWhatsNewAdminRouter(
 
       res.status(200).json(toAdminResponse(updatedPost));
     } catch (error) {
-      handleAdminError(res, error);
+      handleAdminError(res, error, logger, {
+        route: "update_post",
+        actorId,
+        tenantId,
+        postId
+      });
     }
   });
 
   router.get("/posts/:id", async (req: Request, res: Response) => {
+    let actorId: string | undefined;
+    let tenantId: string | undefined;
+    const idParam = req.params.id;
+    const postId = Array.isArray(idParam) ? idParam[0] ?? "" : idParam ?? "";
+
     try {
       const context = getGuardedWhatsNewContext(req);
-      const idParam = req.params.id;
-      const postId = Array.isArray(idParam) ? idParam[0] ?? "" : idParam ?? "";
+      actorId = context.userId;
+      tenantId = context.tenantId;
       const post = await repository.findAdminPostById({
         tenantScope: { tenantId: context.tenantId },
         id: postId
@@ -277,12 +330,23 @@ export function createWhatsNewAdminRouter(
 
       res.status(200).json(toAdminDetailResponse(post));
     } catch (error) {
-      handleAdminError(res, error);
+      handleAdminError(res, error, logger, {
+        route: "get_post_detail",
+        actorId,
+        tenantId,
+        postId
+      });
     }
   });
 
   router.post("/preview", async (req: Request, res: Response) => {
+    let actorId: string | undefined;
+    let tenantId: string | undefined;
+
     try {
+      const context = getGuardedWhatsNewContext(req);
+      actorId = context.userId;
+      tenantId = context.tenantId;
       const payload = (req.body ?? {}) as PreviewBody;
       const bodyMarkdown = normalizeOptionalString("body_markdown", payload.body_markdown) ?? "";
 
@@ -292,15 +356,24 @@ export function createWhatsNewAdminRouter(
 
       res.status(200).json({ safe_html: renderMarkdownSafe(bodyMarkdown) });
     } catch (error) {
-      handleAdminError(res, error);
+      handleAdminError(res, error, logger, {
+        route: "preview_markdown",
+        actorId,
+        tenantId
+      });
     }
   });
 
   router.post("/posts/:id/publish", async (req: Request, res: Response) => {
+    let actorId: string | undefined;
+    let tenantId: string | undefined;
+    const idParam = req.params.id;
+    const postId = Array.isArray(idParam) ? idParam[0] ?? "" : idParam ?? "";
+
     try {
       const context = getGuardedWhatsNewContext(req);
-      const idParam = req.params.id;
-      const postId = Array.isArray(idParam) ? idParam[0] ?? "" : idParam ?? "";
+      actorId = context.userId;
+      tenantId = context.tenantId;
       const post = await repository.publishPost({
         actorId: context.userId,
         tenantScope: { tenantId: context.tenantId },
@@ -321,15 +394,25 @@ export function createWhatsNewAdminRouter(
 
       res.status(200).json(toAdminResponse(post));
     } catch (error) {
-      handleAdminError(res, error);
+      handleAdminError(res, error, logger, {
+        route: "publish_post",
+        actorId,
+        tenantId,
+        postId
+      });
     }
   });
 
   router.post("/posts/:id/unpublish", async (req: Request, res: Response) => {
+    let actorId: string | undefined;
+    let tenantId: string | undefined;
+    const idParam = req.params.id;
+    const postId = Array.isArray(idParam) ? idParam[0] ?? "" : idParam ?? "";
+
     try {
       const context = getGuardedWhatsNewContext(req);
-      const idParam = req.params.id;
-      const postId = Array.isArray(idParam) ? idParam[0] ?? "" : idParam ?? "";
+      actorId = context.userId;
+      tenantId = context.tenantId;
       const post = await repository.unpublishPost({
         actorId: context.userId,
         tenantScope: { tenantId: context.tenantId },
@@ -350,7 +433,12 @@ export function createWhatsNewAdminRouter(
 
       res.status(200).json(toAdminResponse(post));
     } catch (error) {
-      handleAdminError(res, error);
+      handleAdminError(res, error, logger, {
+        route: "unpublish_post",
+        actorId,
+        tenantId,
+        postId
+      });
     }
   });
 
