@@ -3,6 +3,7 @@ import { ValidationError, assertValidStatus } from "./repository";
 
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 50;
+const MAX_SEARCH_LENGTH = 120;
 
 function parseIntegerValue(name: string, rawValue: unknown): number | undefined {
   if (rawValue === undefined || rawValue === null) {
@@ -90,4 +91,27 @@ export function parseAdminTenantFilter(req: Request):
     kind: "tenant",
     tenantId: normalized
   };
+}
+
+export function parseOptionalAdminSearchQuery(req: Request): string | undefined {
+  const rawQuery = req.query.q;
+  if (rawQuery === undefined) {
+    return undefined;
+  }
+
+  const query = Array.isArray(rawQuery) ? rawQuery[0] : rawQuery;
+  if (typeof query !== "string") {
+    throw new ValidationError("q filter is invalid");
+  }
+
+  const normalized = query.trim();
+  if (normalized.length === 0) {
+    return undefined;
+  }
+
+  if (normalized.length > MAX_SEARCH_LENGTH) {
+    throw new ValidationError(`q must be ${MAX_SEARCH_LENGTH} characters or less`);
+  }
+
+  return normalized;
 }

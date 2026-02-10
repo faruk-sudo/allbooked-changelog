@@ -1,6 +1,7 @@
 import express, { type Express } from "express";
 import type { AppConfig } from "./config";
 import { createWhatsNewAdminRouter } from "./changelog/admin-routes";
+import { createWhatsNewPublisherRouter } from "./changelog/publisher-routes";
 import { createWhatsNewApiRouter } from "./changelog/api-routes";
 import { InMemoryChangelogRepository, type ChangelogRepository } from "./changelog/repository";
 import { createWhatsNewRouter } from "./changelog/routes";
@@ -59,6 +60,7 @@ export function createApp(config: AppConfig, dependencies: AppDependencies = {})
 
   app.use("/api/whats-new", createWhatsNewApiRouter(config, changelogRepository, logger));
   app.use("/api/admin/whats-new", createWhatsNewAdminRouter(config, changelogRepository, logger));
+  app.use("/admin/whats-new", createWhatsNewPublisherRouter(config, changelogRepository, logger));
   app.use("/whats-new", createWhatsNewRouter(config, changelogRepository, logger));
 
   app.use((_req, res) => {

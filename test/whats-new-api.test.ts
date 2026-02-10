@@ -504,6 +504,143 @@ describe("What's New admin API", () => {
     expect(response.status).toBe(404);
   });
 
+  it("lists admin posts with published-first sorting and draft fallback sorting", async () => {
+    const repo = new InMemoryChangelogRepository([
+      {
+        id: "published-newer",
+        tenantId: null,
+        visibility: "authenticated",
+        status: "published",
+        category: "new",
+        title: "Published newer",
+        slug: "published-newer",
+        bodyMarkdown: "Body",
+        publishedAt: "2026-02-04T00:00:00.000Z",
+        revision: 1,
+        createdAt: "2026-02-01T00:00:00.000Z",
+        updatedAt: "2026-02-05T00:00:00.000Z"
+      },
+      {
+        id: "published-older",
+        tenantId: "tenant-alpha",
+        visibility: "authenticated",
+        status: "published",
+        category: "fix",
+        title: "Published older",
+        slug: "published-older",
+        bodyMarkdown: "Body",
+        publishedAt: "2026-02-02T00:00:00.000Z",
+        revision: 1,
+        createdAt: "2026-01-20T00:00:00.000Z",
+        updatedAt: "2026-02-02T00:00:00.000Z"
+      },
+      {
+        id: "draft-newer",
+        tenantId: "tenant-alpha",
+        visibility: "authenticated",
+        status: "draft",
+        category: "improvement",
+        title: "Draft newer",
+        slug: "draft-newer",
+        bodyMarkdown: "Body",
+        publishedAt: null,
+        revision: 1,
+        createdAt: "2026-02-06T00:00:00.000Z",
+        updatedAt: "2026-02-10T00:00:00.000Z"
+      },
+      {
+        id: "draft-older",
+        tenantId: null,
+        visibility: "authenticated",
+        status: "draft",
+        category: "new",
+        title: "Draft older",
+        slug: "draft-older",
+        bodyMarkdown: "Body",
+        publishedAt: null,
+        revision: 1,
+        createdAt: "2026-02-05T00:00:00.000Z",
+        updatedAt: "2026-02-07T00:00:00.000Z"
+      }
+    ]);
+    const app = createApp(createConfig(), { changelogRepository: repo });
+
+    const response = await withAdminHeaders(request(app).get("/api/admin/whats-new/posts?limit=10"), {
+      userId: "publisher-1"
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.body.items.map((item: { id: string }) => item.id)).toEqual([
+      "published-newer",
+      "published-older",
+      "draft-newer",
+      "draft-older"
+    ]);
+  });
+
+  it("supports admin list search across title + slug and honors scope/status filters", async () => {
+    const repo = new InMemoryChangelogRepository([
+      {
+        id: "global-published",
+        tenantId: null,
+        visibility: "authenticated",
+        status: "published",
+        category: "new",
+        title: "Global launch announcement",
+        slug: "global-launch",
+        bodyMarkdown: "Body",
+        publishedAt: "2026-02-04T00:00:00.000Z",
+        revision: 1
+      },
+      {
+        id: "tenant-draft",
+        tenantId: "tenant-alpha",
+        visibility: "authenticated",
+        status: "draft",
+        category: "fix",
+        title: "Tenant bug followup",
+        slug: "tenant-bug-followup",
+        bodyMarkdown: "Body",
+        publishedAt: null,
+        revision: 1
+      },
+      {
+        id: "tenant-published",
+        tenantId: "tenant-alpha",
+        visibility: "authenticated",
+        status: "published",
+        category: "improvement",
+        title: "Tenant rollout notes",
+        slug: "tenant-rollout",
+        bodyMarkdown: "Body",
+        publishedAt: "2026-02-02T00:00:00.000Z",
+        revision: 1
+      }
+    ]);
+    const app = createApp(createConfig(), { changelogRepository: repo });
+
+    const searchBySlug = await withAdminHeaders(
+      request(app).get("/api/admin/whats-new/posts?limit=10&q=bug"),
+      { userId: "publisher-1" }
+    );
+    expect(searchBySlug.status).toBe(200);
+    expect(searchBySlug.body.items.map((item: { id: string }) => item.id)).toEqual(["tenant-draft"]);
+
+    const scopeGlobal = await withAdminHeaders(
+      request(app).get("/api/admin/whats-new/posts?limit=10&tenant_id=global"),
+      { userId: "publisher-1" }
+    );
+    expect(scopeGlobal.status).toBe(200);
+    expect(scopeGlobal.body.items.map((item: { id: string }) => item.id)).toEqual(["global-published"]);
+
+    const draftOnly = await withAdminHeaders(
+      request(app).get("/api/admin/whats-new/posts?limit=10&status=draft"),
+      { userId: "publisher-1" }
+    );
+    expect(draftOnly.status).toBe(200);
+    expect(draftOnly.body.items.map((item: { id: string }) => item.id)).toEqual(["tenant-draft"]);
+  });
+
   it("supports create, publish, and unpublish with audit records", async () => {
     const repo = new InMemoryChangelogRepository();
     const app = createApp(createConfig(), { changelogRepository: repo });

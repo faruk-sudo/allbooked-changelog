@@ -117,6 +117,7 @@ export interface ListAdminPostsInput {
   pagination: PaginationInput;
   status?: ChangelogPostStatus;
   tenantFilter?: TenantFilter;
+  search?: string;
 }
 
 export interface ChangelogRepository {
@@ -277,6 +278,30 @@ function toAdminSummary(row: AdminSummaryRow): AdminPostSummary {
     updatedAt: row.updated_at.toISOString(),
     revision: row.revision
   };
+}
+
+function compareAdminPostSummaries(left: AdminPostSummary, right: AdminPostSummary): number {
+  if (left.status === "published" && right.status !== "published") {
+    return -1;
+  }
+
+  if (left.status !== "published" && right.status === "published") {
+    return 1;
+  }
+
+  if (left.status === "published" && right.status === "published") {
+    const publishedDiff = (right.publishedAt ?? "").localeCompare(left.publishedAt ?? "");
+    if (publishedDiff !== 0) {
+      return publishedDiff;
+    }
+  }
+
+  const updatedDiff = right.updatedAt.localeCompare(left.updatedAt);
+  if (updatedDiff !== 0) {
+    return updatedDiff;
+  }
+
+  return right.id.localeCompare(left.id);
 }
 
 export class PostgresChangelogRepository implements ChangelogRepository {
@@ -449,6 +474,11 @@ export class PostgresChangelogRepository implements ChangelogRepository {
       where.push("tenant_id IS NULL");
     }
 
+    if (input.search) {
+      values.push(`%${input.search}%`);
+      where.push(`(title ILIKE $${values.length} OR slug ILIKE $${values.length})`);
+    }
+
     values.push(input.pagination.limit);
     values.push(input.pagination.offset);
 
@@ -468,7 +498,12 @@ export class PostgresChangelogRepository implements ChangelogRepository {
           revision
         FROM changelog_posts
         WHERE ${where.join(" AND ")}
-        ORDER BY updated_at DESC, id DESC
+        ORDER BY
+          CASE WHEN status = 'published' THEN 0 ELSE 1 END ASC,
+          CASE WHEN status = 'published' THEN COALESCE(published_at, updated_at) END DESC NULLS LAST,
+          CASE WHEN status = 'draft' THEN updated_at END DESC NULLS LAST,
+          updated_at DESC,
+          id DESC
         LIMIT $${values.length - 1} OFFSET $${values.length}
       `,
       values
@@ -1002,6 +1037,8 @@ export class InMemoryChangelogRepository implements ChangelogRepository {
   }
 
   async listAdminPosts(input: ListAdminPostsInput): Promise<AdminPostSummary[]> {
+    const normalizedSearch = input.search?.trim().toLowerCase();
+
     return this.posts
       .filter((post) => isScopedToTenant(post.tenantId, input.tenantScope))
       .filter((post) => !input.status || post.status === input.status)
@@ -1014,7 +1051,15 @@ export class InMemoryChangelogRepository implements ChangelogRepository {
         }
         return post.tenantId === input.tenantFilter.tenantId;
       })
-      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+      .filter((post) => {
+        if (!normalizedSearch) {
+          return true;
+        }
+        return (
+          post.title.toLowerCase().includes(normalizedSearch) || post.slug.toLowerCase().includes(normalizedSearch)
+        );
+      })
+      .sort(compareAdminPostSummaries)
       .slice(input.pagination.offset, input.pagination.offset + input.pagination.limit)
       .map(({ bodyMarkdown: _ignored, ...post }) => post);
   }

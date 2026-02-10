@@ -9,14 +9,24 @@ const DEV_SEED_POSTS = [
     title: "Admin Insights Overview",
     bodyMarkdown:
       "## New\n\n- Booking health summary now appears at the top of dashboards.\n- Performance fixes on high-volume calendars.",
-    category: "new"
+    category: "new",
+    status: "published"
   },
   {
     slug: "workflow-polish-roundup",
     title: "Workflow Polish Roundup",
     bodyMarkdown:
       "## Improvements\n\n- Faster sidebar loading for large organizations.\n- Better keyboard behavior across settings pages.",
-    category: "improvement"
+    category: "improvement",
+    status: "published"
+  },
+  {
+    slug: "draft-editor-flow-preview",
+    title: "Draft: Editor Flow Preview",
+    bodyMarkdown:
+      "## Draft notes\n\n- Internal draft for publisher workflow validation.\n- Publish flow lands in the next phase.",
+    category: "fix",
+    status: "draft"
   }
 ] as const;
 
@@ -54,14 +64,14 @@ async function main() {
             $1,
             NULL,
             'authenticated',
-            'published',
-            $2,
+            $2::changelog_post_status,
             $3,
             $4,
             $5,
             $6,
             $7,
-            $7,
+            $8,
+            $8,
             1
           )
           ON CONFLICT (slug)
@@ -78,11 +88,12 @@ async function main() {
         `,
         [
           randomUUID(),
+          post.status,
           post.category,
           post.title,
           post.slug,
           post.bodyMarkdown,
-          publishedAt,
+          post.status === "published" ? publishedAt : null,
           actorId
         ]
       );

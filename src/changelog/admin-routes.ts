@@ -3,7 +3,13 @@ import type { AppConfig } from "../config";
 import { appLogger, type Logger } from "../security/logger";
 import { getGuardedWhatsNewContext } from "./authz";
 import { applyWhatsNewAdminGuards } from "./guards";
-import { parseAdminTenantFilter, parseExpectedRevision, parseOptionalStatusFilter, parsePagination } from "./http";
+import {
+  parseAdminTenantFilter,
+  parseExpectedRevision,
+  parseOptionalAdminSearchQuery,
+  parseOptionalStatusFilter,
+  parsePagination
+} from "./http";
 import {
   ConflictError,
   ValidationError,
@@ -113,6 +119,7 @@ export function createWhatsNewAdminRouter(
       const pagination = parsePagination(req);
       const status = parseOptionalStatusFilter(req);
       const tenantFilter = parseAdminTenantFilter(req);
+      const search = parseOptionalAdminSearchQuery(req);
 
       const posts = await repository.listAdminPosts({
         tenantScope: { tenantId: context.tenantId },
@@ -121,7 +128,8 @@ export function createWhatsNewAdminRouter(
           offset: pagination.offset
         },
         status,
-        tenantFilter
+        tenantFilter,
+        search
       });
 
       logger.info("whats_new_admin_posts_listed", {
@@ -129,6 +137,7 @@ export function createWhatsNewAdminRouter(
         tenantId: context.tenantId,
         count: posts.length,
         status,
+        hasSearchQuery: Boolean(search),
         offset: pagination.offset,
         limit: pagination.limit
       });

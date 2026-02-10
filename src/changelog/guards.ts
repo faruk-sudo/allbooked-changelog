@@ -12,8 +12,12 @@ export function applyWhatsNewReadGuards(router: Router, config: AppConfig): void
   router.use(requireWhatsNewEnabled(config));
 }
 
-export function applyWhatsNewAdminGuards(router: Router, config: AppConfig): void {
+export function applyWhatsNewPublisherGuards(router: Router, config: AppConfig): void {
   applyWhatsNewReadGuards(router, config);
   router.use(requirePublisher(config));
+}
+
+export function applyWhatsNewAdminGuards(router: Router, config: AppConfig): void {
+  applyWhatsNewPublisherGuards(router, config);
   router.use(requireCsrfToken);
 }

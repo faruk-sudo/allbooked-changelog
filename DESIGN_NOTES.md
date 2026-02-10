@@ -223,3 +223,33 @@ No PII payloads should be added when instrumentation is implemented.
    - panel open, full-page mount, detail open, mark-seen success/failure, load-more click
    - detail open source (`panel` vs `page`) is carried via short-lived `sessionStorage` handoff from feed link click
 5. Added analytics consumer notes in `docs/analytics.md` with event definitions and starter query patterns.
+
+## Phase 3A (3.1) publisher admin list UI
+
+### Decisions
+
+1. Added a dedicated internal route at `/admin/whats-new` mounted separately from API routes.
+2. Reused existing server-side authz controls for safe gating:
+   - admin required
+   - tenant allowlist + kill switch required
+   - publisher allowlist required (`404` for non-publisher admins)
+3. Kept list data sourcing on `GET /api/admin/whats-new/posts` and extended it with a server-side `q` filter (title/slug partial match) so pagination remains correct.
+4. Implemented default admin list sorting as:
+   - published first by `published_at DESC` (fallback `updated_at`)
+   - drafts by `updated_at DESC`
+5. Added placeholder navigation routes only (`/admin/whats-new/new`, `/admin/whats-new/:id/edit`) for Phase 3B handoff.
+
+### Components and token usage
+
+- `AdminPostsTable` (`/admin/whats-new` table shell + row rendering):
+  - purpose: internal browse/filter/search surface for draft/published posts
+  - tokens used: `--color-surface-*`, `--color-border-*`, `--color-text-*`, `--space-*`, `--font-size-*`, `--font-weight-*`
+- `AdminStatusPill` (`wn-admin-pill--draft`, `wn-admin-pill--published`):
+  - purpose: high-signal status visibility in list rows
+  - tokens used: `--color-warning-*` (draft), `--color-success-*` (published), `--radius-pill`, `--font-size-xs`
+- `AdminCategoryPill` (`wn-admin-pill--category-*`):
+  - purpose: category tag (`new`/`improvement`/`fix`) in list rows
+  - tokens used: `--color-primary-*`, `--color-success-*`, `--color-warning-*`, `--radius-pill`
+- `AdminFilters` (`wn-admin-input`, `wn-admin-select`):
+  - purpose: status + scope + search controls
+  - tokens used: `--color-surface-base`, `--color-border-default`, `--color-focus-ring`, `--color-focus-offset`, `--space-*`, `--radius-md`
