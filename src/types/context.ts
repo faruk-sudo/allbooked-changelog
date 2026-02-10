@@ -2,6 +2,7 @@ export type UserRole = "ADMIN" | "USER";
 
 export interface AuthContext {
   userId: string;
+  email?: string;
   role: UserRole;
   isAuthenticated: boolean;
 }

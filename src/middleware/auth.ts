@@ -15,6 +15,7 @@ export function hydrateAuthFromHeaders(req: Request, _res: Response, next: NextF
 
   const authContext: AuthContext = {
     userId,
+    email: req.header("x-user-email")?.trim(),
     role: normalizeRole(req.header("x-user-role")),
     isAuthenticated: true
   };

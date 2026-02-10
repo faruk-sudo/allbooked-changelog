@@ -7,7 +7,9 @@ const config: AppConfig = {
   port: 3000,
   whatsNewKillSwitch: false,
   allowlistEnabled: true,
-  allowlistedTenantIds: new Set(["tenant-alpha"])
+  allowlistedTenantIds: new Set(["tenant-alpha"]),
+  publisherAllowlistedUserIds: new Set(["publisher-1"]),
+  publisherAllowlistedEmails: new Set()
 };
 
 describe("GET /whats-new", () => {

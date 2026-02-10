@@ -1,19 +1,61 @@
 import express, { type Express } from "express";
 import type { AppConfig } from "./config";
+import { createWhatsNewAdminRouter } from "./changelog/admin-routes";
+import { createWhatsNewApiRouter } from "./changelog/api-routes";
+import { InMemoryChangelogRepository, type ChangelogRepository } from "./changelog/repository";
 import { createWhatsNewRouter } from "./changelog/routes";
 import { appLogger, type Logger } from "./security/logger";
 
-export function createApp(config: AppConfig, logger: Logger = appLogger): Express {
+export interface AppDependencies {
+  logger?: Logger;
+  changelogRepository?: ChangelogRepository;
+}
+
+function createFallbackRepository(): ChangelogRepository {
+  return new InMemoryChangelogRepository([
+    {
+      id: "post-2026-01-admin-insights",
+      tenantId: null,
+      visibility: "authenticated",
+      status: "published",
+      category: "new",
+      title: "Admin Insights Overview",
+      slug: "admin-insights-overview",
+      bodyMarkdown:
+        "## New\n\n- Booking health summary now appears at the top of dashboards.\n- Performance fixes on high-volume calendars.",
+      publishedAt: "2026-01-22T10:00:00.000Z",
+      revision: 1
+    },
+    {
+      id: "post-2026-02-draft",
+      tenantId: null,
+      visibility: "authenticated",
+      status: "draft",
+      category: "improvement",
+      title: "Draft: Future Improvements",
+      slug: "draft-internal-notes",
+      bodyMarkdown: "Internal draft content.",
+      publishedAt: null,
+      revision: 1
+    }
+  ]);
+}
+
+export function createApp(config: AppConfig, dependencies: AppDependencies = {}): Express {
   const app = express();
+  const logger = dependencies.logger ?? appLogger;
+  const changelogRepository = dependencies.changelogRepository ?? createFallbackRepository();
 
   app.disable("x-powered-by");
-  app.use(express.json({ limit: "16kb" }));
+  app.use(express.json({ limit: "128kb" }));
 
   app.get("/healthz", (_req, res) => {
     res.status(200).json({ status: "ok" });
   });
 
-  app.use("/whats-new", createWhatsNewRouter(config, logger));
+  app.use("/api/whats-new", createWhatsNewApiRouter(config, changelogRepository, logger));
+  app.use("/api/admin/whats-new", createWhatsNewAdminRouter(config, changelogRepository, logger));
+  app.use("/whats-new", createWhatsNewRouter(config, changelogRepository, logger));
 
   app.use((_req, res) => {
     res.status(404).json({ error: "Not found" });
