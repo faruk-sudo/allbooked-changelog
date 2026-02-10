@@ -175,6 +175,20 @@ No PII payloads should be added when instrumentation is implemented.
   - `improvement` -> success
   - `fix` -> warning
 
+## Phase 2.3 full-page list + drawer affordance
+
+### Decisions
+
+1. Promoted `/whats-new` into a true full-page feed and kept pagination semantics aligned with the drawer (`GET /api/whats-new/posts`, cursor-as-offset, client page size `12`).
+2. Extracted shared route-level feed shell markup (`renderWhatsNewFeedBody`) so loading/error/empty/list/load-more structure is reused by both the full-page route and drawer panel.
+3. Added an explicit drawer header affordance to open `/whats-new` in a new tab using an anchor with `target="_blank"` and `rel="noopener noreferrer"`.
+4. Preserved server-side rollout and authorization gates; UI remains progressively enhanced and token-driven via existing design-system primitives.
+
+### Styling approach
+
+- Full-page list layout uses `ds-surface`, `ds-stack`, `ds-text`, and `ds-button` with semantic token values only.
+- New full-page wrapper classes (`wn-list-feed*`) reuse the same feed-item styles already used by the drawer.
+
 ## Phase 2.4 read-state mutation on feed open
 
 ### Decisions

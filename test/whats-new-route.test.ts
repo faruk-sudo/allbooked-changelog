@@ -38,6 +38,22 @@ describe("GET /whats-new", () => {
     expect(response.text).toContain("What's New");
   });
 
+  it("renders full-page feed markup on /whats-new", async () => {
+    const app = createApp(config);
+    const response = await request(app)
+      .get("/whats-new")
+      .set("x-user-id", "admin-1")
+      .set("x-user-role", "ADMIN")
+      .set("x-tenant-id", "tenant-alpha");
+
+    expect(response.status).toBe(200);
+    expect(response.text).toContain('<h1 class="ds-text ds-text--heading">What\'s New</h1>');
+    expect(response.text).toContain('id="whats-new-feed-list"');
+    expect(response.text).toContain('id="whats-new-feed-load-more"');
+    expect(response.text).toContain("Latest updates");
+    expect(response.text).not.toContain('id="whats-new-panel"');
+  });
+
   it("returns 404 for non-allowlisted tenant", async () => {
     const app = createApp(config);
     const response = await request(app)
@@ -73,7 +89,7 @@ describe("GET /whats-new", () => {
     expect(response.text).toContain("What's New");
   });
 
-  it("renders bottom bar entry with unread dot when unread updates exist", async () => {
+  it("renders drawer entry with unread dot on detail route when unread updates exist", async () => {
     const app = createApp(config, {
       changelogRepository: new InMemoryChangelogRepository([
         {
@@ -92,7 +108,7 @@ describe("GET /whats-new", () => {
     });
 
     const response = await request(app)
-      .get("/whats-new")
+      .get("/whats-new/global-update")
       .set("x-user-id", "admin-1")
       .set("x-user-role", "ADMIN")
       .set("x-tenant-id", "tenant-alpha");
@@ -105,7 +121,7 @@ describe("GET /whats-new", () => {
     expect(response.text).toContain('New updates available');
   });
 
-  it("renders bottom bar entry without unread dot when unread is false", async () => {
+  it("renders drawer entry without unread dot on detail route when unread is false", async () => {
     const app = createApp(config, {
       changelogRepository: new InMemoryChangelogRepository(
         [
@@ -133,7 +149,7 @@ describe("GET /whats-new", () => {
     });
 
     const response = await request(app)
-      .get("/whats-new")
+      .get("/whats-new/global-update")
       .set("x-user-id", "admin-1")
       .set("x-user-role", "ADMIN")
       .set("x-tenant-id", "tenant-alpha");
@@ -143,10 +159,10 @@ describe("GET /whats-new", () => {
     expect(response.text).toContain('id="whats-new-unread-dot" class="wn-nav-badge-dot" hidden');
   });
 
-  it("renders whats new side panel markup with dialog semantics", async () => {
+  it("renders whats new side panel markup with dialog semantics on detail route", async () => {
     const app = createApp(config);
     const response = await request(app)
-      .get("/whats-new")
+      .get("/whats-new/example-post")
       .set("x-user-id", "admin-1")
       .set("x-user-role", "ADMIN")
       .set("x-tenant-id", "tenant-alpha");
@@ -157,6 +173,9 @@ describe("GET /whats-new", () => {
     expect(response.text).toContain('aria-modal="true"');
     expect(response.text).toContain('id="whats-new-panel-close"');
     expect(response.text).toContain('id="whats-new-feed-load-more"');
+    expect(response.text).toContain('id="whats-new-panel-open-full-page"');
+    expect(response.text).toContain('target="_blank"');
+    expect(response.text).toContain('rel="noopener noreferrer"');
   });
 
   it("keeps [hidden] behavior enforced for drawer visibility toggles", async () => {

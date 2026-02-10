@@ -67,16 +67,19 @@ export function Example() {
 
 ## What's New Components
 
-Phase 2.2 introduces two feature-level components for the in-app drawer feed:
+Phase 2.2 and 2.3 introduce shared feature-level components for the in-app drawer feed and full-page list:
 
 - `WhatsNewPanel`
 - `WhatsNewFeedItem`
+- `WhatsNewFeedBody` (shared loading/error/empty/list/load-more shell)
 
 Implementation notes for this repo's server-rendered setup:
 
 - `src/changelog/routes.ts`:
   - `renderWhatsNewPanel()` renders the dialog shell (`role="dialog"`, `aria-modal`, close control, loading/empty/error states, and load-more action).
+  - `renderWhatsNewFeedBody()` renders shared feed states and list controls for both the panel and `/whats-new` full-page list.
   - client-side `renderWhatsNewFeedItem(post)` renders each post card safely with text-only excerpt output and category badge.
+  - drawer header includes an explicit full-page affordance (`Open full page (new tab)`).
 - `src/styles/whats-new.css` provides token-driven styling for panel layout, category badges, and feed cards while reusing primitives (`ds-surface`, `ds-button`, `ds-text`, `ds-stack`).
 
 Token dependencies used by these components:

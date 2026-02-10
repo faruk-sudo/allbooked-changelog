@@ -48,7 +48,7 @@ const CLIENT_SCRIPT = `(() => {
   const overlayEl = document.getElementById("whats-new-panel-overlay");
   const panelEl = document.getElementById("whats-new-panel");
   const panelCloseEl = document.getElementById("whats-new-panel-close");
-  const panelStatusEl = document.getElementById("whats-new-panel-status");
+  const panelStatusEl = document.getElementById("whats-new-panel-status") || statusEl;
   const feedListEl = document.getElementById("whats-new-feed-list");
   const loadingEl = document.getElementById("whats-new-feed-loading");
   const emptyEl = document.getElementById("whats-new-feed-empty");
@@ -543,6 +543,8 @@ const CLIENT_SCRIPT = `(() => {
     setUnreadIndicator(hasUnreadState);
     const unreadRefreshPromise = refreshUnreadIndicator();
     const markSeenOnListPromise = appRoot.dataset.view === "list" ? markSeen() : Promise.resolve();
+    const loadFeedOnListPromise =
+      appRoot.dataset.view === "list" ? loadFeedPage("initial") : Promise.resolve();
 
     try {
       if (appRoot.dataset.view === "detail") {
@@ -554,6 +556,7 @@ const CLIENT_SCRIPT = `(() => {
 
     await unreadRefreshPromise;
     await markSeenOnListPromise;
+    await loadFeedOnListPromise;
   })();
 })();`;
 
@@ -581,6 +584,32 @@ function renderBottomBar(hasUnread: boolean): string {
     </nav>`;
 }
 
+function renderWhatsNewFeedBody(contentClassName: string, footerClassName: string): string {
+  return `<div class="${contentClassName}">
+        <div id="whats-new-feed-loading" class="wn-feed-loading" role="status" aria-live="polite" hidden>
+          <span class="wn-spinner" aria-hidden="true"></span>
+          <span class="ds-text ds-text--muted">Loading updates...</span>
+        </div>
+        <p id="whats-new-feed-empty" class="ds-text ds-text--muted" hidden>No updates yet.</p>
+        <div id="whats-new-feed-error" class="wn-feed-error ds-surface ds-surface--sunken" role="status" hidden>
+          <p id="whats-new-feed-error-message" class="ds-text ds-text--muted">Unable to load updates.</p>
+          <button id="whats-new-feed-retry" class="ds-button ds-button--secondary" type="button">Retry</button>
+        </div>
+        <ul id="whats-new-feed-list" class="wn-feed-list"></ul>
+      </div>
+      <footer class="${footerClassName}">
+        <button
+          id="whats-new-feed-load-more"
+          class="ds-button ds-button--secondary wn-feed-load-more"
+          type="button"
+          hidden
+        >
+          <span id="whats-new-feed-load-more-spinner" class="wn-spinner" aria-hidden="true" hidden></span>
+          <span id="whats-new-feed-load-more-label">Load more</span>
+        </button>
+      </footer>`;
+}
+
 function renderWhatsNewPanel(): string {
   return `<div id="whats-new-panel-overlay" class="wn-panel-overlay" hidden></div>
     <aside
@@ -597,38 +626,28 @@ function renderWhatsNewPanel(): string {
           <h2 id="whats-new-panel-title" class="ds-text ds-text--heading">What's New</h2>
           <p id="whats-new-panel-status" class="ds-text ds-text--muted" aria-live="polite"></p>
         </div>
-        <button
-          id="whats-new-panel-close"
-          class="ds-button ds-button--ghost"
-          type="button"
-          aria-label="Close What's New panel"
-        >
-          Close
-        </button>
+        <div class="wn-panel-header-actions ds-stack ds-stack--horizontal">
+          <a
+            id="whats-new-panel-open-full-page"
+            class="ds-button ds-button--secondary wn-panel-open-link"
+            href="/whats-new"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Open full page in a new tab"
+          >
+            Open full page (new tab)
+          </a>
+          <button
+            id="whats-new-panel-close"
+            class="ds-button ds-button--ghost"
+            type="button"
+            aria-label="Close What's New panel"
+          >
+            Close
+          </button>
+        </div>
       </header>
-      <div class="wn-panel-content">
-        <div id="whats-new-feed-loading" class="wn-feed-loading" role="status" aria-live="polite" hidden>
-          <span class="wn-spinner" aria-hidden="true"></span>
-          <span class="ds-text ds-text--muted">Loading updates...</span>
-        </div>
-        <p id="whats-new-feed-empty" class="ds-text ds-text--muted" hidden>No updates yet.</p>
-        <div id="whats-new-feed-error" class="wn-feed-error ds-surface ds-surface--sunken" role="status" hidden>
-          <p id="whats-new-feed-error-message" class="ds-text ds-text--muted">Unable to load updates.</p>
-          <button id="whats-new-feed-retry" class="ds-button ds-button--secondary" type="button">Retry</button>
-        </div>
-        <ul id="whats-new-feed-list" class="wn-feed-list"></ul>
-      </div>
-      <footer class="wn-panel-footer">
-        <button
-          id="whats-new-feed-load-more"
-          class="ds-button ds-button--secondary wn-feed-load-more"
-          type="button"
-          hidden
-        >
-          <span id="whats-new-feed-load-more-spinner" class="wn-spinner" aria-hidden="true" hidden></span>
-          <span id="whats-new-feed-load-more-label">Load more</span>
-        </button>
-      </footer>
+      ${renderWhatsNewFeedBody("wn-panel-content", "wn-panel-footer")}
     </aside>`;
 }
 
@@ -643,12 +662,19 @@ function renderListPage(context: WhatsNewRequestContext, hasUnread: boolean): st
   </head>
   <body class="ds-root wn-page">
     <main class="wn-main">
-      <h1 class="ds-text ds-text--heading">What's New</h1>
-      <p class="ds-text ds-text--muted">Tenant: ${escapeHtml(context.tenantId ?? "unknown")}</p>
-      <p class="ds-text ds-text--body">Use the bottom bar entry to open the update feed.</p>
+      <header class="wn-page-heading ds-stack ds-stack--vertical">
+        <h1 class="ds-text ds-text--heading">What's New</h1>
+        <p class="ds-text ds-text--muted">Tenant: ${escapeHtml(context.tenantId ?? "unknown")}</p>
+        <p id="whats-new-status" class="ds-text ds-text--muted" aria-live="polite"></p>
+      </header>
+      <section class="wn-list-feed ds-surface ds-surface--raised" aria-labelledby="whats-new-feed-heading">
+        <div class="wn-list-feed-heading ds-stack ds-stack--vertical">
+          <h2 id="whats-new-feed-heading" class="ds-text ds-text--heading">Latest updates</h2>
+          <p class="ds-text ds-text--muted">Recent product updates for your workspace.</p>
+        </div>
+        ${renderWhatsNewFeedBody("wn-list-feed-content", "wn-list-feed-footer")}
+      </section>
     </main>
-    ${renderWhatsNewPanel()}
-    ${renderBottomBar(hasUnread)}
     <div
       id="whats-new-app"
       data-view="list"
