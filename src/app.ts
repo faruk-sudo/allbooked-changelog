@@ -53,6 +53,10 @@ export function createApp(config: AppConfig, dependencies: AppDependencies = {})
     res.status(200).json({ status: "ok" });
   });
 
+  app.get("/", (_req, res) => {
+    res.redirect(302, "/whats-new");
+  });
+
   app.use("/api/whats-new", createWhatsNewApiRouter(config, changelogRepository, logger));
   app.use("/api/admin/whats-new", createWhatsNewAdminRouter(config, changelogRepository, logger));
   app.use("/whats-new", createWhatsNewRouter(config, changelogRepository, logger));

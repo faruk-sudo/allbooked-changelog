@@ -92,6 +92,7 @@ The repository was empty at implementation time, so no existing UI stack, stylin
 4. Markdown is rendered through the existing safe pipeline (`markdown-it` with raw HTML disabled + strict `sanitize-html`).
 5. State-changing admin actions write audit rows with summary metadata only; markdown bodies are never stored in audit metadata.
 6. Application logs include IDs and action summaries only; markdown content remains redacted.
+7. Local-browser developer ergonomics use a configurable dev auth fallback (`WHATS_NEW_DEV_AUTH_BYPASS`) that auto-hydrates auth/tenant context when headers are missing; this is disabled automatically in production `NODE_ENV`.
 
 ### Tradeoffs and follow-ups
 

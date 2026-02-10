@@ -14,6 +14,10 @@ function createConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     allowlistedTenantIds: new Set(["tenant-alpha"]),
     publisherAllowlistedUserIds: new Set(["publisher-1"]),
     publisherAllowlistedEmails: new Set(),
+    devAuthBypassEnabled: false,
+    devAuthBypassUserId: "dev-admin-1",
+    devAuthBypassUserRole: "ADMIN",
+    devAuthBypassTenantId: "tenant-alpha",
     ...overrides
   };
 }

@@ -28,11 +28,15 @@ cp .env.example .env
 npm run dev
 ```
 4. Open:
+- Root (redirects): `http://localhost:3000/`
 - Health: `http://localhost:3000/healthz`
 - What's New: `http://localhost:3000/whats-new`
 
 ## Required request headers (stub auth/tenant context)
-The current implementation uses headers as an auth/tenant stub until real SSO is integrated:
+The current implementation uses headers as an auth/tenant stub until real SSO is integrated.
+In local dev, `.env.example` enables a dev auth fallback so browser access works without headers.
+
+When dev auth fallback is disabled, these headers are required:
 - `x-user-id`: any non-empty ID
 - `x-user-role`: must be `ADMIN` for access
 - `x-tenant-id`: tenant identifier, must be allowlisted (when allowlist is enabled)
@@ -54,6 +58,11 @@ curl -i http://localhost:3000/whats-new \
 - `WHATS_NEW_ALLOWLIST_TENANT_IDS`: comma-separated tenant IDs (e.g. `tenant-alpha,tenant-beta`)
 - `WHATS_NEW_PUBLISHER_ALLOWLIST_USER_IDS`: comma-separated user IDs allowed to use admin CRUD endpoints
 - `WHATS_NEW_PUBLISHER_ALLOWLIST_EMAILS`: optional comma-separated fallback email allowlist (exact match)
+- `WHATS_NEW_DEV_AUTH_BYPASS`: `true|false`; when `true`, missing auth/tenant headers are auto-populated for local browser testing (disabled automatically in production `NODE_ENV`)
+- `WHATS_NEW_DEV_USER_ID`: fallback user ID when dev auth bypass is enabled
+- `WHATS_NEW_DEV_USER_ROLE`: fallback role (`ADMIN` or `USER`) when dev auth bypass is enabled
+- `WHATS_NEW_DEV_TENANT_ID`: fallback tenant ID when dev auth bypass is enabled
+- `WHATS_NEW_DEV_USER_EMAIL`: optional fallback email when dev auth bypass is enabled
 - `DATABASE_URL`: PostgreSQL connection string for migrations/seeding/smoke checks
 - `DATABASE_SSL`: `true|false` (default `false`) for DB TLS
 - `DATABASE_SSL_REJECT_UNAUTHORIZED`: `true|false` (default `true`) when TLS is enabled

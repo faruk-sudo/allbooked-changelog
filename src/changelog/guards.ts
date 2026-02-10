@@ -1,6 +1,7 @@
 import type { Router } from "express";
 import type { AppConfig } from "../config";
 import { hydrateAuthFromHeaders, requireAdmin, requireAuthenticated } from "../middleware/auth";
+import { applyDevAuthFallback } from "../middleware/dev-auth";
 import { requireAllowlistedTenant } from "../middleware/allowlist";
 import { requirePublisherAllowlisted } from "../middleware/publisher";
 import { hydrateTenantFromHeaders, requireTenantContext } from "../middleware/tenant";
@@ -11,6 +12,7 @@ export function applyWhatsNewReadGuards(router: Router, config: AppConfig): void
   router.use(whatsNewSecurityHeaders);
   router.use(hydrateTenantFromHeaders);
   router.use(hydrateAuthFromHeaders);
+  router.use(applyDevAuthFallback(config));
   router.use(requireAuthenticated);
   router.use(requireAdmin);
   router.use(requireTenantContext);
