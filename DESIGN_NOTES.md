@@ -100,6 +100,32 @@ The repository was empty at implementation time, so no existing UI stack, stylin
 - Pagination currently supports offset/cursor-as-offset for simplicity; can evolve to opaque cursors if feed size grows.
 - Endpoint-level rate limiting is not yet implemented because no shared limiter exists in this service today.
 
+### Verification evidence (live API checks)
+
+Verification run date: February 10, 2026.
+
+- Read API and page:
+  - `/` redirected to `/whats-new` (`302`).
+  - `/whats-new` returned `200` for allowlisted admin.
+  - `GET /api/whats-new/posts` returned DB records including newly created verification posts.
+  - `GET /api/whats-new/posts/:slug` returned sanitized `safe_html`; script tags were escaped and no executable links were produced.
+- Admin and publisher gating:
+  - Non-admin request returned `403` (`Admin access required`).
+  - Non-publisher admin request to CRUD returned `404` (no allowlist details leaked).
+  - Publisher-allowlisted admin successfully completed create/update/publish/unpublish flow.
+- Tenant allowlist and kill switch:
+  - Non-allowlisted tenant returned `404`.
+  - Allowlisted tenant returned `200`.
+  - With `WHATS_NEW_KILL_SWITCH=true`, read/admin endpoints returned `404` even for otherwise allowlisted admins.
+- Audit log checks (via Postgres):
+  - `changelog_audit_log` recorded create/update/publish/unpublish actions.
+  - Metadata stored summary fields only.
+  - JSON path check confirmed `0` rows containing `body_markdown`/`bodyMarkdown` keys.
+
+Issue discovered during verification:
+- Publish transition initially returned `500` due enum parameter typing in SQL update path.
+- Fixed in commit `511ccf7` by casting status parameter to `changelog_post_status`.
+
 ## Intended analytics events (names only, not implemented)
 
 - `whats_new_api_posts_listed`
