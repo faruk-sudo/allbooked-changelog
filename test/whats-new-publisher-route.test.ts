@@ -71,15 +71,36 @@ describe("What's New publisher admin route", () => {
     expect(response.status).toBe(404);
   });
 
-  it("serves placeholder create and edit routes", async () => {
-    const app = createApp(createConfig(), { changelogRepository: new InMemoryChangelogRepository() });
+  it("serves create and edit draft routes", async () => {
+    const app = createApp(createConfig(), {
+      changelogRepository: new InMemoryChangelogRepository([
+        {
+          id: "post-123",
+          tenantId: "tenant-alpha",
+          visibility: "authenticated",
+          status: "draft",
+          category: "new",
+          title: "Draft title",
+          slug: "draft-title",
+          bodyMarkdown: "",
+          publishedAt: null,
+          revision: 1
+        }
+      ])
+    });
 
     const createResponse = await withHeaders(request(app).get("/admin/whats-new/new"));
     expect(createResponse.status).toBe(200);
-    expect(createResponse.text).toContain("Create post");
+    expect(createResponse.text).toContain("Create draft");
+    expect(createResponse.text).toContain('id="whats-new-editor-form"');
+    expect(createResponse.text).toContain('id="whats-new-editor-preview"');
 
     const editResponse = await withHeaders(request(app).get("/admin/whats-new/post-123/edit"));
     expect(editResponse.status).toBe(200);
-    expect(editResponse.text).toContain("Edit post post-123");
+    expect(editResponse.text).toContain("Edit draft");
+    expect(editResponse.text).toContain('data-mode="edit"');
+
+    const missingEditResponse = await withHeaders(request(app).get("/admin/whats-new/missing/edit"));
+    expect(missingEditResponse.status).toBe(404);
   });
 });

@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import type { AppConfig } from "../config";
 import { appLogger, type Logger } from "../security/logger";
+import { renderMarkdownSafe } from "../security/markdown";
 import { getGuardedWhatsNewContext } from "./authz";
 import { applyWhatsNewAdminGuards } from "./guards";
 import {
@@ -11,6 +12,7 @@ import {
   parsePagination
 } from "./http";
 import {
+  BODY_MAX_LENGTH,
   ConflictError,
   ValidationError,
   assertValidCategory,
@@ -33,6 +35,10 @@ interface UpdatePostBody {
   category?: unknown;
   tenant_id?: unknown;
   expected_revision?: unknown;
+}
+
+interface PreviewBody {
+  body_markdown?: unknown;
 }
 
 function normalizeOptionalString(field: string, value: unknown): string | undefined {
@@ -88,6 +94,26 @@ function toAdminResponse(post: {
     created_at: post.createdAt,
     updated_at: post.updatedAt,
     revision: post.revision
+  };
+}
+
+function toAdminDetailResponse(post: {
+  id: string;
+  tenantId: string | null;
+  visibility: string;
+  status: string;
+  category: string;
+  title: string;
+  slug: string;
+  bodyMarkdown: string;
+  publishedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  revision: number;
+}) {
+  return {
+    ...toAdminResponse(post),
+    body_markdown: post.bodyMarkdown
   };
 }
 
@@ -162,19 +188,21 @@ export function createWhatsNewAdminRouter(
       const title = normalizeOptionalString("title", body.title);
       const bodyMarkdown = normalizeOptionalString("body_markdown", body.body_markdown);
       const categoryValue = normalizeOptionalString("category", body.category);
+      const slugValue = normalizeOptionalString("slug", body.slug);
 
-      if (!title || !bodyMarkdown || !categoryValue) {
-        throw new ValidationError("title, body_markdown, and category are required");
+      if (!categoryValue) {
+        throw new ValidationError("category is required");
       }
 
       const createdPost = await repository.createDraftPost({
         actorId: context.userId,
         tenantScope: { tenantId: context.tenantId },
         tenantId: normalizeOptionalTenantId(body.tenant_id),
-        title,
-        slug: body.slug === undefined ? undefined : sanitizeSlugOrThrow(normalizeOptionalString("slug", body.slug) ?? ""),
+        title: title ?? "",
+        slug:
+          slugValue === undefined || slugValue.trim().length === 0 ? undefined : sanitizeSlugOrThrow(slugValue),
         category: assertValidCategory(categoryValue),
-        bodyMarkdown
+        bodyMarkdown: bodyMarkdown ?? ""
       });
 
       logger.info("whats_new_admin_post_created", {
@@ -195,6 +223,7 @@ export function createWhatsNewAdminRouter(
       const idParam = req.params.id;
       const postId = Array.isArray(idParam) ? idParam[0] ?? "" : idParam ?? "";
       const body = (req.body ?? {}) as UpdatePostBody;
+      const slugValue = normalizeOptionalString("slug", body.slug);
 
       const updatedPost = await repository.updatePost({
         actorId: context.userId,
@@ -202,9 +231,9 @@ export function createWhatsNewAdminRouter(
         id: postId,
         title: normalizeOptionalString("title", body.title),
         slug:
-          body.slug === undefined
+          slugValue === undefined || slugValue.trim().length === 0
             ? undefined
-            : sanitizeSlugOrThrow(normalizeOptionalString("slug", body.slug) ?? ""),
+            : sanitizeSlugOrThrow(slugValue),
         category:
           body.category === undefined
             ? undefined
@@ -226,6 +255,42 @@ export function createWhatsNewAdminRouter(
       });
 
       res.status(200).json(toAdminResponse(updatedPost));
+    } catch (error) {
+      handleAdminError(res, error);
+    }
+  });
+
+  router.get("/posts/:id", async (req: Request, res: Response) => {
+    try {
+      const context = getGuardedWhatsNewContext(req);
+      const idParam = req.params.id;
+      const postId = Array.isArray(idParam) ? idParam[0] ?? "" : idParam ?? "";
+      const post = await repository.findAdminPostById({
+        tenantScope: { tenantId: context.tenantId },
+        id: postId
+      });
+
+      if (!post) {
+        res.status(404).json({ error: "Not found" });
+        return;
+      }
+
+      res.status(200).json(toAdminDetailResponse(post));
+    } catch (error) {
+      handleAdminError(res, error);
+    }
+  });
+
+  router.post("/preview", async (req: Request, res: Response) => {
+    try {
+      const payload = (req.body ?? {}) as PreviewBody;
+      const bodyMarkdown = normalizeOptionalString("body_markdown", payload.body_markdown) ?? "";
+
+      if (bodyMarkdown.length > BODY_MAX_LENGTH) {
+        throw new ValidationError(`body_markdown must be ${BODY_MAX_LENGTH} characters or less`);
+      }
+
+      res.status(200).json({ safe_html: renderMarkdownSafe(bodyMarkdown) });
     } catch (error) {
       handleAdminError(res, error);
     }

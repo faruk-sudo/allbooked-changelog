@@ -253,3 +253,32 @@ No PII payloads should be added when instrumentation is implemented.
 - `AdminFilters` (`wn-admin-input`, `wn-admin-select`):
   - purpose: status + scope + search controls
   - tokens used: `--color-surface-base`, `--color-border-default`, `--color-focus-ring`, `--color-focus-offset`, `--space-*`, `--radius-md`
+
+## Phase 3B (3.2) publisher create/edit draft UI
+
+### Decisions
+
+1. Replaced placeholder routes with guarded internal authoring pages:
+   - `GET /admin/whats-new/new`
+   - `GET /admin/whats-new/:id/edit`
+2. Added admin detail + preview API endpoints behind existing publisher/admin/allowlist/kill-switch guards:
+   - `GET /api/admin/whats-new/posts/:id`
+   - `POST /api/admin/whats-new/preview`
+3. Kept preview sanitization aligned with reader surfaces by reusing `renderMarkdownSafe` from `src/security/markdown.ts`.
+4. Implemented slug UX in the editor client:
+   - auto-generate from title by default
+   - stop auto-overwriting once manually edited
+   - validate pattern/length client-side
+   - map `409 slug already exists` responses to inline slug errors + suggested alternative.
+5. Added dirty-form navigation protection (`beforeunload` + internal link confirm) for accidental navigation.
+6. Updated draft content rules so empty title/body can be saved while draft, but publishing now enforces both fields server-side.
+
+### Design-system component usage
+
+- `MarkdownEditor` (`.wn-admin-textarea`)
+- `PreviewPane` (`.wn-admin-editor-preview-pane`, `.wn-admin-editor-preview-body`)
+- `FormField` (`.wn-admin-field`, `.wn-admin-input`, `.wn-admin-select`)
+- `InlineError` (`.wn-admin-inline-error`)
+- `EditorBanner` (`.wn-admin-editor-banner--success|error|warning`)
+
+All styling remains token-driven via semantic variables (`--color-*`, `--space-*`, `--radius-*`, `--font-*`) in `src/styles/whats-new-admin.css`.

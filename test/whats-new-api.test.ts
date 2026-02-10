@@ -641,6 +641,150 @@ describe("What's New admin API", () => {
     expect(draftOnly.body.items.map((item: { id: string }) => item.id)).toEqual(["tenant-draft"]);
   });
 
+  it("returns admin post detail by id with markdown body and tenant isolation", async () => {
+    const repo = new InMemoryChangelogRepository([
+      {
+        id: "tenant-draft",
+        tenantId: "tenant-alpha",
+        visibility: "authenticated",
+        status: "draft",
+        category: "new",
+        title: "Tenant draft",
+        slug: "tenant-draft",
+        bodyMarkdown: "## Tenant markdown body",
+        publishedAt: null,
+        revision: 2
+      },
+      {
+        id: "other-tenant-draft",
+        tenantId: "tenant-beta",
+        visibility: "authenticated",
+        status: "draft",
+        category: "fix",
+        title: "Other tenant draft",
+        slug: "other-tenant-draft",
+        bodyMarkdown: "Hidden",
+        publishedAt: null,
+        revision: 1
+      }
+    ]);
+    const app = createApp(
+      createConfig({
+        allowlistedTenantIds: new Set(["tenant-alpha", "tenant-beta"])
+      }),
+      { changelogRepository: repo }
+    );
+
+    const detailResponse = await withAdminHeaders(
+      request(app).get("/api/admin/whats-new/posts/tenant-draft"),
+      { userId: "publisher-1" }
+    );
+
+    expect(detailResponse.status).toBe(200);
+    expect(detailResponse.body.id).toBe("tenant-draft");
+    expect(detailResponse.body.body_markdown).toContain("Tenant markdown");
+
+    const crossTenantResponse = await withAdminHeaders(
+      request(app).get("/api/admin/whats-new/posts/other-tenant-draft"),
+      { userId: "publisher-1", tenantId: "tenant-alpha" }
+    );
+    expect(crossTenantResponse.status).toBe(404);
+  });
+
+  it("sanitizes markdown preview payloads on admin endpoint", async () => {
+    const app = createApp(createConfig(), { changelogRepository: new InMemoryChangelogRepository() });
+    const response = await withAdminHeaders(
+      request(app)
+        .post("/api/admin/whats-new/preview")
+        .set("x-csrf-token", csrfToken)
+        .send({
+          body_markdown:
+            "<script>alert(1)</script><img src=x onerror=alert(2)> [safe](https://example.com) [bad](javascript:alert(3)) **ok**"
+        }),
+      { userId: "publisher-1" }
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.body.safe_html).toContain("<strong>ok</strong>");
+    expect(response.body.safe_html).toContain('href="https://example.com"');
+    expect(response.body.safe_html).not.toMatch(/<script/i);
+    expect(response.body.safe_html).not.toMatch(/<[^>]+\\son(?:error|load)\\s*=/i);
+    expect(response.body.safe_html).not.toMatch(/href\\s*=\\s*"\\s*javascript:/i);
+  });
+
+  it("allows saving empty draft content and blocks publishing until title/body exist", async () => {
+    const repo = new InMemoryChangelogRepository();
+    const app = createApp(createConfig(), { changelogRepository: repo });
+
+    const createResponse = await withAdminHeaders(
+      request(app).post("/api/admin/whats-new/posts").set("x-csrf-token", csrfToken),
+      { userId: "publisher-1" }
+    ).send({
+      category: "new",
+      title: "",
+      body_markdown: ""
+    });
+
+    expect(createResponse.status).toBe(201);
+    expect(createResponse.body.title).toBe("");
+
+    const publishResponse = await withAdminHeaders(
+      request(app)
+        .post(`/api/admin/whats-new/posts/${createResponse.body.id}/publish`)
+        .set("x-csrf-token", csrfToken),
+      { userId: "publisher-1" }
+    ).send({
+      expected_revision: createResponse.body.revision
+    });
+
+    expect(publishResponse.status).toBe(400);
+    expect(String(publishResponse.body.error || "")).toContain("required");
+  });
+
+  it("returns 409 for slug conflicts on update", async () => {
+    const repo = new InMemoryChangelogRepository([
+      {
+        id: "post-1",
+        tenantId: "tenant-alpha",
+        visibility: "authenticated",
+        status: "draft",
+        category: "new",
+        title: "Post one",
+        slug: "post-one",
+        bodyMarkdown: "One",
+        publishedAt: null,
+        revision: 1
+      },
+      {
+        id: "post-2",
+        tenantId: "tenant-alpha",
+        visibility: "authenticated",
+        status: "draft",
+        category: "fix",
+        title: "Post two",
+        slug: "post-two",
+        bodyMarkdown: "Two",
+        publishedAt: null,
+        revision: 1
+      }
+    ]);
+    const app = createApp(createConfig(), { changelogRepository: repo });
+
+    const updateResponse = await withAdminHeaders(
+      request(app)
+        .put("/api/admin/whats-new/posts/post-1")
+        .set("x-csrf-token", csrfToken)
+        .send({
+          slug: "post-two",
+          expected_revision: 1
+        }),
+      { userId: "publisher-1" }
+    );
+
+    expect(updateResponse.status).toBe(409);
+    expect(String(updateResponse.body.error || "")).toContain("slug");
+  });
+
   it("supports create, publish, and unpublish with audit records", async () => {
     const repo = new InMemoryChangelogRepository();
     const app = createApp(createConfig(), { changelogRepository: repo });

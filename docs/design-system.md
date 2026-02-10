@@ -94,6 +94,28 @@ Token dependencies used by these components:
 - Interaction/focus: existing primitive button focus ring tokens (`--color-focus-ring`, `--color-focus-offset`)
 - Layering/shadow: `--z-overlay`, `--z-modal`, `--shadow-md`
 
+## What's New Publisher Draft Editor (Phase 3B)
+
+Internal draft authoring routes (`/admin/whats-new/new`, `/admin/whats-new/:id/edit`) use tokenized feature components rendered from `src/changelog/publisher-routes.ts` with styles in `src/styles/whats-new-admin.css`.
+
+Feature component map:
+
+- `MarkdownEditor` (`#whats-new-editor-body`, `.wn-admin-textarea`):
+  - purpose: internal markdown authoring surface for draft content.
+  - tokens: `--color-surface-base`, `--color-border-default`, `--color-focus-ring`, `--space-*`, `--font-family-mono`, `--radius-md`.
+- `PreviewPane` (`#whats-new-editor-preview`, `.wn-admin-editor-preview-*`):
+  - purpose: live preview rendered from server-sanitized markdown (`POST /api/admin/whats-new/preview`).
+  - tokens: `--color-surface-base`, `--color-surface-sunken`, `--color-border-subtle`, `--space-*`, `--radius-md`.
+- `FormField` (`.wn-admin-field`, `.wn-admin-input`, `.wn-admin-select`):
+  - purpose: shared title/category/scope/slug metadata controls.
+  - tokens: `--color-text-muted`, `--color-border-default`, `--color-focus-ring`, `--space-*`, `--font-size-sm`.
+- `InlineError` (`.wn-admin-inline-error`):
+  - purpose: field-level validation and conflict feedback (`slug` 409 mapping, validation errors).
+  - tokens: `--color-danger-bg`, `--font-size-sm`, `--font-weight-medium`.
+- `EditorBanner` (`.wn-admin-editor-banner--*`):
+  - purpose: global success/error/warning save feedback.
+  - tokens: `--color-success-*`, `--color-danger-*`, `--color-warning-*`, `--radius-md`, `--space-*`.
+
 ## Adding a New Token
 
 1. Add a primitive token in `tokens.json` if the raw value is new.

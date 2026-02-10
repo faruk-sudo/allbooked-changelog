@@ -9,6 +9,7 @@ export type ChangelogAuditAction = "create" | "update" | "publish" | "unpublish"
 export const TITLE_MAX_LENGTH = 180;
 export const BODY_MAX_LENGTH = 50_000;
 export const EXCERPT_MAX_LENGTH = 220;
+export const SLUG_MAX_LENGTH = 120;
 
 const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const CATEGORY_VALUES = new Set<ChangelogPostCategory>(["new", "improvement", "fix"]);
@@ -68,6 +69,10 @@ export interface AdminPostSummary {
   revision: number;
 }
 
+export interface AdminPostDetail extends AdminPostSummary {
+  bodyMarkdown: string;
+}
+
 export interface CreatePostInput {
   actorId: string;
   tenantScope: TenantScope;
@@ -123,6 +128,7 @@ export interface ListAdminPostsInput {
 export interface ChangelogRepository {
   listPublishedPosts(input: ListPublishedInput): Promise<PublicPostSummary[]>;
   findPublishedPostBySlug(tenantScope: TenantScope, slug: string): Promise<PublicPostDetail | null>;
+  findAdminPostById(input: { tenantScope: TenantScope; id: string }): Promise<AdminPostDetail | null>;
   hasUnreadPosts(input: HasUnreadInput): Promise<boolean>;
   markSeen(input: MarkSeenInput): Promise<string>;
   listAdminPosts(input: ListAdminPostsInput): Promise<AdminPostSummary[]>;
@@ -161,6 +167,10 @@ interface AdminSummaryRow {
   revision: number;
 }
 
+interface AdminDetailRow extends AdminSummaryRow {
+  body_markdown: string;
+}
+
 function normalizeWhitespace(input: string): string {
   return input.replace(/\s+/g, " ").trim();
 }
@@ -196,6 +206,25 @@ export function sanitizeBodyMarkdown(input: string): string {
   return value;
 }
 
+function sanitizeDraftTitle(input: string): string {
+  const value = normalizeWhitespace(input);
+  if (value.length > TITLE_MAX_LENGTH) {
+    throw new ValidationError(`title must be ${TITLE_MAX_LENGTH} characters or less`);
+  }
+  return value;
+}
+
+function sanitizeDraftBodyMarkdown(input: string): string {
+  if (input.length > BODY_MAX_LENGTH) {
+    throw new ValidationError(`body_markdown must be ${BODY_MAX_LENGTH} characters or less`);
+  }
+  return input;
+}
+
+function hasRequiredPublishedContent(value: string): boolean {
+  return value.trim().length > 0;
+}
+
 export function assertValidCategory(input: string): ChangelogPostCategory {
   if (!CATEGORY_VALUES.has(input as ChangelogPostCategory)) {
     throw new ValidationError("category must be one of: new, improvement, fix");
@@ -212,6 +241,9 @@ export function assertValidStatus(input: string): ChangelogPostStatus {
 
 export function sanitizeSlugOrThrow(input: string): string {
   const slug = input.trim().toLowerCase();
+  if (slug.length === 0 || slug.length > SLUG_MAX_LENGTH) {
+    throw new ValidationError(`slug must be between 1 and ${SLUG_MAX_LENGTH} characters`);
+  }
   if (!SLUG_PATTERN.test(slug)) {
     throw new ValidationError("slug must be lowercase letters, numbers, and hyphens only");
   }
@@ -219,11 +251,15 @@ export function sanitizeSlugOrThrow(input: string): string {
 }
 
 function slugifyTitle(title: string): string {
-  const slug = title
+  let slug = title
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .replace(/-{2,}/g, "-");
+
+  if (slug.length > SLUG_MAX_LENGTH) {
+    slug = slug.slice(0, SLUG_MAX_LENGTH).replace(/-+$/g, "");
+  }
 
   if (!slug) {
     return "post";
@@ -280,6 +316,21 @@ function toAdminSummary(row: AdminSummaryRow): AdminPostSummary {
   };
 }
 
+function toAdminDetail(row: AdminDetailRow): AdminPostDetail {
+  return {
+    ...toAdminSummary(row),
+    bodyMarkdown: row.body_markdown
+  };
+}
+
+function buildSlugCandidate(baseSlug: string, index: number): string {
+  const suffix = index === 0 ? "" : `-${index + 1}`;
+  const maxBaseLength = Math.max(1, SLUG_MAX_LENGTH - suffix.length);
+  const truncatedBase = baseSlug.slice(0, maxBaseLength).replace(/-+$/g, "");
+  const normalizedBase = truncatedBase.length > 0 ? truncatedBase : "post".slice(0, maxBaseLength);
+  return `${normalizedBase}${suffix}`;
+}
+
 function compareAdminPostSummaries(left: AdminPostSummary, right: AdminPostSummary): number {
   if (left.status === "published" && right.status !== "published") {
     return -1;
@@ -306,6 +357,37 @@ function compareAdminPostSummaries(left: AdminPostSummary, right: AdminPostSumma
 
 export class PostgresChangelogRepository implements ChangelogRepository {
   constructor(private readonly pool: Pool) {}
+
+  async findAdminPostById(input: { tenantScope: TenantScope; id: string }): Promise<AdminPostDetail | null> {
+    const result = await this.pool.query<AdminDetailRow>(
+      `
+        SELECT
+          id,
+          tenant_id,
+          visibility,
+          status,
+          category,
+          title,
+          slug,
+          body_markdown,
+          published_at,
+          created_at,
+          updated_at,
+          revision
+        FROM changelog_posts
+        WHERE id = $1
+        LIMIT 1
+      `,
+      [input.id]
+    );
+
+    const row = result.rows[0];
+    if (!row || !isScopedToTenant(row.tenant_id, input.tenantScope)) {
+      return null;
+    }
+
+    return toAdminDetail(row);
+  }
 
   async listPublishedPosts(input: ListPublishedInput): Promise<PublicPostSummary[]> {
     const result = await this.pool.query<PostRow>(
@@ -513,8 +595,8 @@ export class PostgresChangelogRepository implements ChangelogRepository {
   }
 
   async createDraftPost(input: CreatePostInput): Promise<AdminPostSummary> {
-    const title = sanitizeTitle(input.title);
-    const bodyMarkdown = sanitizeBodyMarkdown(input.bodyMarkdown);
+    const title = sanitizeDraftTitle(input.title);
+    const bodyMarkdown = sanitizeDraftBodyMarkdown(input.bodyMarkdown);
     const category = assertValidCategory(input.category);
     const requestedTenantId = normalizeTenantIdOrThrow(input.tenantId, input.tenantScope);
     const actorId = input.actorId.trim();
@@ -645,7 +727,7 @@ export class PostgresChangelogRepository implements ChangelogRepository {
       const changedFields: string[] = [];
 
       if (input.title !== undefined) {
-        const title = sanitizeTitle(input.title);
+        const title = existing.status === "published" ? sanitizeTitle(input.title) : sanitizeDraftTitle(input.title);
         if (title !== existing.title) {
           values.push(title);
           updates.push(`title = $${values.length}`);
@@ -672,7 +754,10 @@ export class PostgresChangelogRepository implements ChangelogRepository {
       }
 
       if (input.bodyMarkdown !== undefined) {
-        const bodyMarkdown = sanitizeBodyMarkdown(input.bodyMarkdown);
+        const bodyMarkdown =
+          existing.status === "published"
+            ? sanitizeBodyMarkdown(input.bodyMarkdown)
+            : sanitizeDraftBodyMarkdown(input.bodyMarkdown);
         if (bodyMarkdown !== existing.body_markdown) {
           values.push(bodyMarkdown);
           updates.push(`body_markdown = $${values.length}`);
@@ -805,6 +890,13 @@ export class PostgresChangelogRepository implements ChangelogRepository {
         throw new ConflictError(`post already ${targetStatus}`);
       }
 
+      if (
+        targetStatus === "published" &&
+        (!hasRequiredPublishedContent(existing.title) || !hasRequiredPublishedContent(existing.body_markdown))
+      ) {
+        throw new ValidationError("title and body_markdown are required before publishing");
+      }
+
       const updateResult = await client.query<AdminSummaryRow>(
         `
           UPDATE changelog_posts
@@ -869,11 +961,11 @@ export class PostgresChangelogRepository implements ChangelogRepository {
 
     const base = slugifyTitle(title);
     if (skipUniquenessProbe) {
-      return base;
+      return sanitizeSlugOrThrow(base);
     }
 
     for (let index = 0; index < 100; index += 1) {
-      const candidate = index === 0 ? base : `${base}-${index + 1}`;
+      const candidate = sanitizeSlugOrThrow(buildSlugCandidate(base, index));
       const existing = await client.query<{ id: string }>(
         `
           SELECT id
@@ -984,6 +1076,28 @@ export class InMemoryChangelogRepository implements ChangelogRepository {
     };
   }
 
+  async findAdminPostById(input: { tenantScope: TenantScope; id: string }): Promise<AdminPostDetail | null> {
+    const post = this.posts.find((candidate) => candidate.id === input.id);
+    if (!post || !isScopedToTenant(post.tenantId, input.tenantScope)) {
+      return null;
+    }
+
+    return {
+      id: post.id,
+      tenantId: post.tenantId,
+      visibility: post.visibility,
+      status: post.status,
+      category: post.category,
+      title: post.title,
+      slug: post.slug,
+      bodyMarkdown: post.bodyMarkdown,
+      publishedAt: post.publishedAt,
+      createdAt: post.createdAt,
+      updatedAt: post.updatedAt,
+      revision: post.revision
+    };
+  }
+
   async hasUnreadPosts(input: HasUnreadInput): Promise<boolean> {
     const tenantId = input.tenantScope.tenantId.trim();
     const userId = input.userId.trim();
@@ -1072,9 +1186,9 @@ export class InMemoryChangelogRepository implements ChangelogRepository {
       visibility: "authenticated",
       status: "draft",
       category: assertValidCategory(input.category),
-      title: sanitizeTitle(input.title),
+      title: sanitizeDraftTitle(input.title),
       slug: sanitizeSlugOrThrow(input.slug ?? slugifyTitle(input.title)),
-      bodyMarkdown: sanitizeBodyMarkdown(input.bodyMarkdown),
+      bodyMarkdown: sanitizeDraftBodyMarkdown(input.bodyMarkdown),
       publishedAt: null,
       createdAt,
       updatedAt: createdAt,
@@ -1120,7 +1234,7 @@ export class InMemoryChangelogRepository implements ChangelogRepository {
     const nextPost: InMemoryPost = { ...existing };
 
     if (input.title !== undefined) {
-      const title = sanitizeTitle(input.title);
+      const title = existing.status === "published" ? sanitizeTitle(input.title) : sanitizeDraftTitle(input.title);
       if (title !== existing.title) {
         changedFields.push("title");
         nextPost.title = title;
@@ -1147,7 +1261,10 @@ export class InMemoryChangelogRepository implements ChangelogRepository {
     }
 
     if (input.bodyMarkdown !== undefined) {
-      const bodyMarkdown = sanitizeBodyMarkdown(input.bodyMarkdown);
+      const bodyMarkdown =
+        existing.status === "published"
+          ? sanitizeBodyMarkdown(input.bodyMarkdown)
+          : sanitizeDraftBodyMarkdown(input.bodyMarkdown);
       if (bodyMarkdown !== existing.bodyMarkdown) {
         changedFields.push("body_markdown");
         nextPost.bodyMarkdown = bodyMarkdown;
@@ -1219,6 +1336,13 @@ export class InMemoryChangelogRepository implements ChangelogRepository {
 
     if (existing.status === status) {
       throw new ConflictError(`post already ${status}`);
+    }
+
+    if (
+      status === "published" &&
+      (!hasRequiredPublishedContent(existing.title) || !hasRequiredPublishedContent(existing.bodyMarkdown))
+    ) {
+      throw new ValidationError("title and body_markdown are required before publishing");
     }
 
     const nextPost: InMemoryPost = {
