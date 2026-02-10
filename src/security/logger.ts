@@ -2,7 +2,7 @@ interface LogMetadata {
   [key: string]: unknown;
 }
 
-const SENSITIVE_KEYS = new Set(["body", "bodyMarkdown", "markdown", "content"]);
+const SENSITIVE_KEYS = new Set(["body", "bodyMarkdown", "body_markdown", "markdown", "content"]);
 
 function redactSensitiveFields(metadata: LogMetadata): LogMetadata {
   return Object.fromEntries(

@@ -28,14 +28,20 @@ cp .env.example .env
 npm run dev
 ```
 4. Open:
+- Root (redirects): `http://localhost:3000/`
 - Health: `http://localhost:3000/healthz`
 - What's New: `http://localhost:3000/whats-new`
 
 ## Required request headers (stub auth/tenant context)
-The current implementation uses headers as an auth/tenant stub until real SSO is integrated:
+The current implementation uses headers as an auth/tenant stub until real SSO is integrated.
+In local dev, `.env.example` enables a dev auth fallback so browser access works without headers.
+
+When dev auth fallback is disabled, these headers are required:
 - `x-user-id`: any non-empty ID
 - `x-user-role`: must be `ADMIN` for access
 - `x-tenant-id`: tenant identifier, must be allowlisted (when allowlist is enabled)
+- `x-user-email`: optional; only used for publisher allowlist fallback
+- `x-csrf-token`: required for mutating admin API endpoints (`POST`/`PUT`)
 
 Example:
 ```bash
@@ -50,18 +56,26 @@ curl -i http://localhost:3000/whats-new \
 - `WHATS_NEW_KILL_SWITCH`: `true|false`; when `true`, blocks all tenants
 - `WHATS_NEW_ALLOWLIST_ENABLED`: `true|false`; when `false`, any tenant with context is allowed
 - `WHATS_NEW_ALLOWLIST_TENANT_IDS`: comma-separated tenant IDs (e.g. `tenant-alpha,tenant-beta`)
+- `WHATS_NEW_PUBLISHER_ALLOWLIST_USER_IDS`: comma-separated user IDs allowed to use admin CRUD endpoints
+- `WHATS_NEW_PUBLISHER_ALLOWLIST_EMAILS`: optional comma-separated fallback email allowlist (exact match)
+- `WHATS_NEW_DEV_AUTH_BYPASS`: `true|false`; when `true`, missing auth/tenant headers are auto-populated for local browser testing (disabled automatically in production `NODE_ENV`)
+- `WHATS_NEW_DEV_USER_ID`: fallback user ID when dev auth bypass is enabled
+- `WHATS_NEW_DEV_USER_ROLE`: fallback role (`ADMIN` or `USER`) when dev auth bypass is enabled
+- `WHATS_NEW_DEV_TENANT_ID`: fallback tenant ID when dev auth bypass is enabled
+- `WHATS_NEW_DEV_USER_EMAIL`: optional fallback email when dev auth bypass is enabled
 - `DATABASE_URL`: PostgreSQL connection string for migrations/seeding/smoke checks
 - `DATABASE_SSL`: `true|false` (default `false`) for DB TLS
 - `DATABASE_SSL_REJECT_UNAUTHORIZED`: `true|false` (default `true`) when TLS is enabled
 
 ## Security defaults included
-- Admin-only access enforced server-side on `/whats-new` routes
+- Admin-only access enforced server-side on `/whats-new`, `/api/whats-new`, and `/api/admin/whats-new`
 - Tenant context and allowlist gate enforced server-side
 - Non-allowlisted tenants receive `404`
+- Publisher allowlist gate enforced on admin CRUD endpoints
 - CSP/security headers via Helmet for `/whats-new` routes
 - Markdown rendering blocks raw HTML and sanitizes output
 - Logging intentionally avoids markdown/body content
-- CSRF middleware scaffolded for future mutating admin endpoints
+- CSRF token required on mutating admin endpoints
 
 ## Database setup and migrations
 1. Start PostgreSQL locally and ensure `DATABASE_URL` points to an existing database.
@@ -87,7 +101,7 @@ Migration files live in `db/migrations`.
 ## DB smoke check
 Run constraint-level verification against a local Postgres instance:
 ```bash
-npm run db:smoke
+npm run db:smoke-check
 ```
 
 The smoke check verifies:
@@ -95,8 +109,25 @@ The smoke check verifies:
 - post slug uniqueness is enforced
 - read-state uniqueness on `(tenant_id, user_id)` is enforced
 
+## API endpoints
+Read API (admin + allowlisted tenant):
+- `GET /api/whats-new/posts?limit=20&offset=0` (supports `cursor` alias for offset)
+- `GET /api/whats-new/posts/:slug`
+
+Admin API (admin + allowlisted tenant + publisher allowlist + CSRF token for mutating methods):
+- `GET /api/admin/whats-new/posts?status=draft|published&tenant_id=<current-tenant|global>&limit=20&offset=0`
+- `POST /api/admin/whats-new/posts`
+- `PUT /api/admin/whats-new/posts/:id`
+- `POST /api/admin/whats-new/posts/:id/publish`
+- `POST /api/admin/whats-new/posts/:id/unpublish`
+
+Audit log behavior:
+- All state-changing admin endpoints write to `changelog_audit_log`.
+- Audit metadata stores summaries only (e.g. `changed_fields`, status transitions), never markdown bodies.
+
 ## Current app data source
-Published and draft mock posts still live in `src/changelog/repository.ts`. DB-backed read/write endpoints are intentionally out of scope for this phase.
+- `src/server.ts` uses Postgres-backed changelog repository (`changelog_posts`, `changelog_audit_log`, `changelog_read_state`).
+- `/whats-new` page route now fetches from `GET /api/whats-new/posts` and `GET /api/whats-new/posts/:slug`.
 
 ## Tests
 Run unit tests:

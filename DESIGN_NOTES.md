@@ -22,25 +22,10 @@
 - Allowlist toggle: `WHATS_NEW_ALLOWLIST_ENABLED` controls whether tenant ID checks are enforced.
 - Tenant IDs: `WHATS_NEW_ALLOWLIST_TENANT_IDS` configures rollout cohort.
 
-## Data model (seeded)
-`ChangelogPost`
-- `id`
-- `slug`
-- `title`
-- `bodyMarkdown`
-- `status` (`draft` | `published`)
-- `publishedAt`
+## Data model posture
 
-v1 route reads only `published` posts.
-
-## Intended analytics events (names only, not implemented)
-- `whats_new_list_viewed`
-- `whats_new_post_viewed`
-- `whats_new_blocked_not_admin`
-- `whats_new_blocked_not_allowlisted`
-- `whats_new_killswitch_blocked`
-
-No PII payloads should be added when instrumentation is implemented.
+- Runtime reads/writes now use PostgreSQL changelog tables (`changelog_posts`, `changelog_read_state`, `changelog_audit_log`).
+- v1 read path serves only `published` + `authenticated` posts, scoped to `(tenant_id = currentTenant OR tenant_id IS NULL)`.
 
 ## Design system foundation
 
@@ -78,3 +63,77 @@ The repository was empty at implementation time, so no existing UI stack, stylin
 
 - Audit logs are append-oriented and should be retained according to compliance policy (exact retention window to be set with security/legal before production rollout).
 - `visibility='public'` is modelled now for forward compatibility, but v1 behavior should continue to serve authenticated/admin-only content until explicitly enabled.
+
+## Phase 1.4 API + admin CRUD
+
+### Endpoint surface
+
+- Read API:
+  - `GET /api/whats-new/posts`
+  - `GET /api/whats-new/posts/:slug`
+- Admin CRUD API:
+  - `GET /api/admin/whats-new/posts`
+  - `POST /api/admin/whats-new/posts`
+  - `PUT /api/admin/whats-new/posts/:id`
+  - `POST /api/admin/whats-new/posts/:id/publish`
+  - `POST /api/admin/whats-new/posts/:id/unpublish`
+- UI wiring:
+  - `/whats-new` page now reads from the read API.
+
+### Security and privacy controls
+
+1. Shared guards applied server-side to all What’s New endpoints:
+   - authenticated user required
+   - ADMIN role required
+   - tenant context required
+   - tenant allowlist + kill switch required
+2. Admin CRUD endpoints require an additional publisher allowlist gate.
+3. CSRF token validation is enforced on mutating admin methods (`POST`/`PUT`).
+4. Markdown is rendered through the existing safe pipeline (`markdown-it` with raw HTML disabled + strict `sanitize-html`).
+5. State-changing admin actions write audit rows with summary metadata only; markdown bodies are never stored in audit metadata.
+6. Application logs include IDs and action summaries only; markdown content remains redacted.
+7. Local-browser developer ergonomics use a configurable dev auth fallback (`WHATS_NEW_DEV_AUTH_BYPASS`) that auto-hydrates auth/tenant context when headers are missing; this is disabled automatically in production `NODE_ENV`.
+
+### Tradeoffs and follow-ups
+
+- Publisher allowlist is an env-driven stopgap until role-based publisher permissions are available from the identity system.
+- Pagination currently supports offset/cursor-as-offset for simplicity; can evolve to opaque cursors if feed size grows.
+- Endpoint-level rate limiting is not yet implemented because no shared limiter exists in this service today.
+
+### Verification evidence (live API checks)
+
+Verification run date: February 10, 2026.
+
+- Read API and page:
+  - `/` redirected to `/whats-new` (`302`).
+  - `/whats-new` returned `200` for allowlisted admin.
+  - `GET /api/whats-new/posts` returned DB records including newly created verification posts.
+  - `GET /api/whats-new/posts/:slug` returned sanitized `safe_html`; script tags were escaped and no executable links were produced.
+- Admin and publisher gating:
+  - Non-admin request returned `403` (`Admin access required`).
+  - Non-publisher admin request to CRUD returned `404` (no allowlist details leaked).
+  - Publisher-allowlisted admin successfully completed create/update/publish/unpublish flow.
+- Tenant allowlist and kill switch:
+  - Non-allowlisted tenant returned `404`.
+  - Allowlisted tenant returned `200`.
+  - With `WHATS_NEW_KILL_SWITCH=true`, read/admin endpoints returned `404` even for otherwise allowlisted admins.
+- Audit log checks (via Postgres):
+  - `changelog_audit_log` recorded create/update/publish/unpublish actions.
+  - Metadata stored summary fields only.
+  - JSON path check confirmed `0` rows containing `body_markdown`/`bodyMarkdown` keys.
+
+Issue discovered during verification:
+- Publish transition initially returned `500` due enum parameter typing in SQL update path.
+- Fixed in commit `511ccf7` by casting status parameter to `changelog_post_status`.
+
+## Intended analytics events (names only, not implemented)
+
+- `whats_new_api_posts_listed`
+- `whats_new_api_post_viewed`
+- `whats_new_admin_posts_listed`
+- `whats_new_admin_post_created`
+- `whats_new_admin_post_updated`
+- `whats_new_admin_post_published`
+- `whats_new_admin_post_unpublished`
+
+No PII payloads should be added when instrumentation is implemented.
