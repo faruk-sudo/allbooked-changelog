@@ -99,6 +99,8 @@ describe("GET /whats-new", () => {
 
     expect(response.status).toBe(200);
     expect(response.text).toContain('id="whats-new-entry-link"');
+    expect(response.text).toContain('aria-controls="whats-new-panel"');
+    expect(response.text).toContain('aria-expanded="false"');
     expect(response.text).toContain('id="whats-new-unread-dot" class="wn-nav-badge-dot"');
     expect(response.text).toContain('New updates available');
   });
@@ -139,5 +141,34 @@ describe("GET /whats-new", () => {
     expect(response.status).toBe(200);
     expect(response.text).toContain('id="whats-new-entry-link"');
     expect(response.text).toContain('id="whats-new-unread-dot" class="wn-nav-badge-dot" hidden');
+  });
+
+  it("renders whats new side panel markup with dialog semantics", async () => {
+    const app = createApp(config);
+    const response = await request(app)
+      .get("/whats-new")
+      .set("x-user-id", "admin-1")
+      .set("x-user-role", "ADMIN")
+      .set("x-tenant-id", "tenant-alpha");
+
+    expect(response.status).toBe(200);
+    expect(response.text).toContain('id="whats-new-panel"');
+    expect(response.text).toContain('role="dialog"');
+    expect(response.text).toContain('aria-modal="true"');
+    expect(response.text).toContain('id="whats-new-panel-close"');
+    expect(response.text).toContain('id="whats-new-feed-load-more"');
+  });
+
+  it("keeps [hidden] behavior enforced for drawer visibility toggles", async () => {
+    const app = createApp(config);
+    const response = await request(app)
+      .get("/whats-new/assets/styles.css")
+      .set("x-user-id", "admin-1")
+      .set("x-user-role", "ADMIN")
+      .set("x-tenant-id", "tenant-alpha");
+
+    expect(response.status).toBe(200);
+    expect(response.text).toContain(".wn-page [hidden]");
+    expect(response.text).toContain("display: none !important;");
   });
 });

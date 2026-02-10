@@ -81,6 +81,59 @@ describe("What's New read API", () => {
     ]);
   });
 
+  it("supports deterministic cursor pagination ordered by published_at desc and id desc", async () => {
+    const repo = new InMemoryChangelogRepository([
+      {
+        id: "a-id",
+        tenantId: null,
+        visibility: "authenticated",
+        status: "published",
+        category: "new",
+        title: "A post",
+        slug: "a-post",
+        bodyMarkdown: "A body",
+        publishedAt: "2026-02-04T00:00:00.000Z",
+        revision: 1
+      },
+      {
+        id: "z-id",
+        tenantId: null,
+        visibility: "authenticated",
+        status: "published",
+        category: "improvement",
+        title: "Z post",
+        slug: "z-post",
+        bodyMarkdown: "Z body",
+        publishedAt: "2026-02-04T00:00:00.000Z",
+        revision: 1
+      },
+      {
+        id: "b-id",
+        tenantId: null,
+        visibility: "authenticated",
+        status: "published",
+        category: "fix",
+        title: "Older post",
+        slug: "older-post",
+        bodyMarkdown: "Older body",
+        publishedAt: "2026-02-01T00:00:00.000Z",
+        revision: 1
+      }
+    ]);
+
+    const app = createApp(createConfig(), { changelogRepository: repo });
+
+    const firstPage = await withAdminHeaders(request(app).get("/api/whats-new/posts?limit=2"));
+    expect(firstPage.status).toBe(200);
+    expect(firstPage.body.items.map((item: { slug: string }) => item.slug)).toEqual(["z-post", "a-post"]);
+    expect(firstPage.body.pagination.next_cursor).toBe("2");
+
+    const secondPage = await withAdminHeaders(request(app).get("/api/whats-new/posts?limit=2&cursor=2"));
+    expect(secondPage.status).toBe(200);
+    expect(secondPage.body.items.map((item: { slug: string }) => item.slug)).toEqual(["older-post"]);
+    expect(secondPage.body.pagination.next_cursor).toBeNull();
+  });
+
   it("returns sanitized HTML on detail endpoint and neutralizes XSS payloads", async () => {
     const repo = new InMemoryChangelogRepository([
       {

@@ -24,6 +24,10 @@ function escapeHtml(input: string): string {
 }
 
 const CLIENT_SCRIPT = `(() => {
+  const PAGE_SIZE = 12;
+  const FOCUSABLE_SELECTOR =
+    'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
   const appRoot = document.getElementById("whats-new-app");
   if (!appRoot) {
     return;
@@ -39,6 +43,21 @@ const CLIENT_SCRIPT = `(() => {
   const unreadLinkEl = document.getElementById("whats-new-entry-link");
   const unreadDotEl = document.getElementById("whats-new-unread-dot");
   const unreadTextEl = document.getElementById("whats-new-unread-text");
+  const overlayEl = document.getElementById("whats-new-panel-overlay");
+  const panelEl = document.getElementById("whats-new-panel");
+  const panelCloseEl = document.getElementById("whats-new-panel-close");
+  const panelStatusEl = document.getElementById("whats-new-panel-status");
+  const feedListEl = document.getElementById("whats-new-feed-list");
+  const loadingEl = document.getElementById("whats-new-feed-loading");
+  const emptyEl = document.getElementById("whats-new-feed-empty");
+  const errorEl = document.getElementById("whats-new-feed-error");
+  const errorMessageEl = document.getElementById("whats-new-feed-error-message");
+  const retryEl = document.getElementById("whats-new-feed-retry");
+  const loadMoreEl = document.getElementById("whats-new-feed-load-more");
+  const loadMoreLabelEl = document.getElementById("whats-new-feed-load-more-label");
+  const loadMoreSpinnerEl = document.getElementById("whats-new-feed-load-more-spinner");
+  const detailBasePath = appRoot.dataset.detailBase || "/whats-new/";
+  const dateFormatter = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
 
   const setUnreadIndicator = (hasUnread) => {
     if (!unreadLinkEl || !unreadDotEl || !unreadTextEl) {
@@ -60,6 +79,13 @@ const CLIENT_SCRIPT = `(() => {
     statusEl.textContent = message;
   };
 
+  const setPanelStatus = (message) => {
+    if (!panelStatusEl) {
+      return;
+    }
+    panelStatusEl.textContent = message;
+  };
+
   const requestJson = async (path) => {
     const response = await fetch(path, {
       method: "GET",
@@ -73,44 +99,207 @@ const CLIENT_SCRIPT = `(() => {
     return response.json();
   };
 
-  const renderList = async () => {
-    const listEl = document.getElementById("whats-new-list");
-    if (!listEl) {
+  const formatPublishedDate = (isoDate) => {
+    const parsed = new Date(isoDate);
+    if (Number.isNaN(parsed.valueOf())) {
+      return isoDate || "";
+    }
+    return dateFormatter.format(parsed);
+  };
+
+  const getCategoryPresentation = (rawCategory) => {
+    if (rawCategory === "improvement") {
+      return { label: "Improvement", tone: "improvement" };
+    }
+    if (rawCategory === "fix") {
+      return { label: "Fix", tone: "fix" };
+    }
+    return { label: "New", tone: "new" };
+  };
+
+  const getSafeExcerpt = (post) => {
+    const rawExcerpt = typeof post.excerpt === "string" ? post.excerpt : "";
+    const normalized = rawExcerpt.replace(/\s+/g, " ").trim();
+    if (normalized.length > 0) {
+      return normalized;
+    }
+    return "Details available in the full update.";
+  };
+
+  const renderWhatsNewFeedItem = (post) => {
+    const itemEl = document.createElement("li");
+    itemEl.className = "wn-feed-item ds-surface ds-surface--raised";
+
+    const category = getCategoryPresentation(post.category);
+    const categoryEl = document.createElement("span");
+    categoryEl.className = "wn-category-badge wn-category-badge--" + category.tone;
+    categoryEl.textContent = category.label;
+    itemEl.appendChild(categoryEl);
+
+    const titleEl = document.createElement("h3");
+    titleEl.className = "wn-feed-title";
+
+    const slug = typeof post.slug === "string" ? post.slug.trim() : "";
+    const canNavigate = detailBasePath.length > 0 && slug.length > 0;
+    if (canNavigate) {
+      const linkEl = document.createElement("a");
+      linkEl.className = "wn-post-link";
+      linkEl.href = detailBasePath + encodeURIComponent(slug);
+      linkEl.textContent =
+        typeof post.title === "string" && post.title.trim().length > 0 ? post.title : "Untitled update";
+      titleEl.appendChild(linkEl);
+    } else {
+      const textEl = document.createElement("span");
+      textEl.className = "ds-text ds-text--body";
+      textEl.textContent =
+        typeof post.title === "string" && post.title.trim().length > 0 ? post.title : "Untitled update";
+      titleEl.appendChild(textEl);
+    }
+
+    itemEl.appendChild(titleEl);
+
+    const publishedAt = typeof post.published_at === "string" ? post.published_at : "";
+    const dateEl = document.createElement("time");
+    dateEl.className = "ds-text ds-text--muted";
+    dateEl.dateTime = publishedAt;
+    dateEl.textContent = formatPublishedDate(publishedAt);
+    itemEl.appendChild(dateEl);
+
+    const excerptEl = document.createElement("p");
+    excerptEl.className = "ds-text ds-text--body";
+    excerptEl.textContent = getSafeExcerpt(post);
+    itemEl.appendChild(excerptEl);
+
+    return itemEl;
+  };
+
+  const feedState = {
+    items: [],
+    cursor: null,
+    hasMore: false,
+    hasLoadedOnce: false,
+    loadingInitial: false,
+    loadingMore: false,
+    error: null,
+    lastFailedMode: null
+  };
+
+  let panelTriggerEl = null;
+
+  const readNextCursor = (payload) => {
+    const nextCursor = payload && payload.pagination ? payload.pagination.next_cursor : null;
+    if (nextCursor === null || nextCursor === undefined || nextCursor === "") {
+      return null;
+    }
+    return String(nextCursor);
+  };
+
+  const updatePanelLoadMoreUi = () => {
+    if (!loadMoreEl) {
       return;
     }
 
-    setStatus("Loading posts...");
-    const payload = await requestJson("/api/whats-new/posts?limit=20");
-    listEl.innerHTML = "";
+    const shouldShowLoadMore = feedState.items.length > 0 && feedState.hasMore && !feedState.error;
+    loadMoreEl.hidden = !shouldShowLoadMore;
+    loadMoreEl.disabled = feedState.loadingMore;
 
-    const items = payload.items || [];
-    if (items.length === 0) {
-      setStatus("No published posts yet.");
+    if (loadMoreLabelEl) {
+      loadMoreLabelEl.textContent = feedState.loadingMore ? "Loading..." : "Load more";
+    }
+
+    if (loadMoreSpinnerEl) {
+      loadMoreSpinnerEl.hidden = !feedState.loadingMore;
+    }
+  };
+
+  const renderFeedState = () => {
+    if (!feedListEl || !loadingEl || !emptyEl || !errorEl) {
       return;
     }
 
-    setStatus("");
+    feedListEl.innerHTML = "";
+    for (const post of feedState.items) {
+      feedListEl.appendChild(renderWhatsNewFeedItem(post));
+    }
 
-    for (const post of items) {
-      const li = document.createElement("li");
-      li.className = "wn-post-list-item";
-      const link = document.createElement("a");
-      link.className = "wn-post-link";
-      link.href = "/whats-new/" + encodeURIComponent(post.slug);
-      link.textContent = post.title;
+    loadingEl.hidden = !feedState.loadingInitial;
+    emptyEl.hidden = feedState.loadingInitial || feedState.items.length > 0 || Boolean(feedState.error);
+    errorEl.hidden = !feedState.error;
 
-      const meta = document.createElement("small");
-      meta.className = "ds-text ds-text--muted";
-      meta.textContent = " " + post.published_at;
+    if (errorMessageEl) {
+      errorMessageEl.textContent = feedState.error || "";
+    }
 
-      const excerpt = document.createElement("p");
-      excerpt.className = "ds-text ds-text--body";
-      excerpt.textContent = post.excerpt;
+    updatePanelLoadMoreUi();
 
-      li.appendChild(link);
-      li.appendChild(meta);
-      li.appendChild(excerpt);
-      listEl.appendChild(li);
+    if (feedState.loadingInitial) {
+      setPanelStatus("Loading updates...");
+      return;
+    }
+
+    if (feedState.error) {
+      setPanelStatus("Unable to load updates.");
+      return;
+    }
+
+    if (feedState.items.length === 0) {
+      setPanelStatus("No updates yet.");
+      return;
+    }
+
+    setPanelStatus("");
+  };
+
+  const buildFeedPath = () => {
+    const params = new URLSearchParams();
+    params.set("limit", String(PAGE_SIZE));
+    if (feedState.cursor) {
+      params.set("cursor", feedState.cursor);
+    }
+    return "/api/whats-new/posts?" + params.toString();
+  };
+
+  const loadFeedPage = async (mode) => {
+    if (mode === "initial" && feedState.loadingInitial) {
+      return;
+    }
+
+    if (mode === "more" && (feedState.loadingMore || !feedState.hasMore)) {
+      return;
+    }
+
+    if (mode === "initial") {
+      feedState.items = [];
+      feedState.cursor = null;
+      feedState.hasMore = false;
+      feedState.loadingInitial = true;
+    } else {
+      feedState.loadingMore = true;
+    }
+
+    feedState.error = null;
+    feedState.lastFailedMode = null;
+    renderFeedState();
+
+    try {
+      const payload = await requestJson(buildFeedPath());
+      const items = Array.isArray(payload.items) ? payload.items : [];
+      if (mode === "initial") {
+        feedState.items = items;
+      } else {
+        feedState.items = feedState.items.concat(items);
+      }
+      feedState.cursor = readNextCursor(payload);
+      feedState.hasMore = Boolean(feedState.cursor);
+      feedState.hasLoadedOnce = true;
+      feedState.error = null;
+    } catch {
+      feedState.error = "Unable to load updates. Please try again.";
+      feedState.lastFailedMode = mode;
+    } finally {
+      feedState.loadingInitial = false;
+      feedState.loadingMore = false;
+      renderFeedState();
     }
   };
 
@@ -139,6 +328,165 @@ const CLIENT_SCRIPT = `(() => {
     }
   };
 
+  const getFocusableElements = () => {
+    if (!panelEl) {
+      return [];
+    }
+
+    return Array.from(panelEl.querySelectorAll(FOCUSABLE_SELECTOR)).filter((element) => {
+      if (!(element instanceof HTMLElement)) {
+        return false;
+      }
+      return !element.hasAttribute("hidden");
+    });
+  };
+
+  const focusInitialPanelTarget = () => {
+    if (panelCloseEl instanceof HTMLElement) {
+      panelCloseEl.focus();
+      return;
+    }
+
+    if (panelEl instanceof HTMLElement) {
+      panelEl.focus();
+    }
+  };
+
+  const closePanel = () => {
+    if (!panelEl || panelEl.hidden) {
+      return;
+    }
+
+    panelEl.hidden = true;
+    if (overlayEl) {
+      overlayEl.hidden = true;
+    }
+
+    document.body.classList.remove("wn-panel-open");
+
+    if (unreadLinkEl) {
+      unreadLinkEl.setAttribute("aria-expanded", "false");
+    }
+
+    document.removeEventListener("keydown", onPanelKeydown);
+
+    if (panelTriggerEl && typeof panelTriggerEl.focus === "function") {
+      panelTriggerEl.focus();
+    }
+
+    panelTriggerEl = null;
+  };
+
+  const openPanel = () => {
+    if (!panelEl || !overlayEl || panelEl.hidden === false) {
+      return;
+    }
+
+    if (document.activeElement instanceof HTMLElement) {
+      panelTriggerEl = document.activeElement;
+    } else {
+      panelTriggerEl = unreadLinkEl;
+    }
+
+    overlayEl.hidden = false;
+    panelEl.hidden = false;
+    document.body.classList.add("wn-panel-open");
+
+    if (unreadLinkEl) {
+      unreadLinkEl.setAttribute("aria-expanded", "true");
+    }
+
+    document.addEventListener("keydown", onPanelKeydown);
+    focusInitialPanelTarget();
+
+    if (!feedState.hasLoadedOnce) {
+      void loadFeedPage("initial");
+    }
+  };
+
+  const onPanelKeydown = (event) => {
+    if (!panelEl || panelEl.hidden) {
+      return;
+    }
+
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closePanel();
+      return;
+    }
+
+    if (event.key !== "Tab") {
+      return;
+    }
+
+    const focusable = getFocusableElements();
+    if (focusable.length === 0) {
+      event.preventDefault();
+      if (panelEl instanceof HTMLElement) {
+        panelEl.focus();
+      }
+      return;
+    }
+
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    const active = document.activeElement;
+
+    if (event.shiftKey && active === first) {
+      event.preventDefault();
+      if (last instanceof HTMLElement) {
+        last.focus();
+      }
+      return;
+    }
+
+    if (!event.shiftKey && active === last) {
+      event.preventDefault();
+      if (first instanceof HTMLElement) {
+        first.focus();
+      }
+    }
+  };
+
+  if (unreadLinkEl) {
+    unreadLinkEl.addEventListener("click", (event) => {
+      if (!panelEl || !overlayEl) {
+        return;
+      }
+      event.preventDefault();
+      if (panelEl.hidden) {
+        openPanel();
+      } else {
+        closePanel();
+      }
+    });
+  }
+
+  if (panelCloseEl) {
+    panelCloseEl.addEventListener("click", () => {
+      closePanel();
+    });
+  }
+
+  if (overlayEl) {
+    overlayEl.addEventListener("click", () => {
+      closePanel();
+    });
+  }
+
+  if (loadMoreEl) {
+    loadMoreEl.addEventListener("click", () => {
+      void loadFeedPage("more");
+    });
+  }
+
+  if (retryEl) {
+    retryEl.addEventListener("click", () => {
+      const mode = feedState.lastFailedMode || (feedState.items.length > 0 ? "more" : "initial");
+      void loadFeedPage(mode);
+    });
+  }
+
   (async () => {
     setUnreadIndicator(appRoot.dataset.initialHasUnread === "true");
     const unreadRefreshPromise = refreshUnreadIndicator();
@@ -146,8 +494,6 @@ const CLIENT_SCRIPT = `(() => {
     try {
       if (appRoot.dataset.view === "detail") {
         await renderDetail();
-      } else {
-        await renderList();
       }
     } catch {
       setStatus("Unable to load What's New content.");
@@ -170,13 +516,66 @@ function renderBottomBar(hasUnread: boolean): string {
         id="whats-new-entry-link"
         class="ds-button ds-button--ghost wn-bottom-link"
         href="/whats-new"
-        aria-current="page"
+        aria-controls="whats-new-panel"
+        aria-haspopup="dialog"
+        aria-expanded="false"
         aria-label="${escapeHtml(ariaLabel)}"
       >
         <span>What's New</span>
         ${renderNavBadgeDot(hasUnread)}
       </a>
     </nav>`;
+}
+
+function renderWhatsNewPanel(): string {
+  return `<div id="whats-new-panel-overlay" class="wn-panel-overlay" hidden></div>
+    <aside
+      id="whats-new-panel"
+      class="wn-panel ds-surface ds-surface--raised"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="whats-new-panel-title"
+      tabindex="-1"
+      hidden
+    >
+      <header class="wn-panel-header">
+        <div class="wn-panel-heading ds-stack ds-stack--vertical">
+          <h2 id="whats-new-panel-title" class="ds-text ds-text--heading">What's New</h2>
+          <p id="whats-new-panel-status" class="ds-text ds-text--muted" aria-live="polite"></p>
+        </div>
+        <button
+          id="whats-new-panel-close"
+          class="ds-button ds-button--ghost"
+          type="button"
+          aria-label="Close What's New panel"
+        >
+          Close
+        </button>
+      </header>
+      <div class="wn-panel-content">
+        <div id="whats-new-feed-loading" class="wn-feed-loading" role="status" aria-live="polite" hidden>
+          <span class="wn-spinner" aria-hidden="true"></span>
+          <span class="ds-text ds-text--muted">Loading updates...</span>
+        </div>
+        <p id="whats-new-feed-empty" class="ds-text ds-text--muted" hidden>No updates yet.</p>
+        <div id="whats-new-feed-error" class="wn-feed-error ds-surface ds-surface--sunken" role="status" hidden>
+          <p id="whats-new-feed-error-message" class="ds-text ds-text--muted">Unable to load updates.</p>
+          <button id="whats-new-feed-retry" class="ds-button ds-button--secondary" type="button">Retry</button>
+        </div>
+        <ul id="whats-new-feed-list" class="wn-feed-list"></ul>
+      </div>
+      <footer class="wn-panel-footer">
+        <button
+          id="whats-new-feed-load-more"
+          class="ds-button ds-button--secondary wn-feed-load-more"
+          type="button"
+          hidden
+        >
+          <span id="whats-new-feed-load-more-spinner" class="wn-spinner" aria-hidden="true" hidden></span>
+          <span id="whats-new-feed-load-more-label">Load more</span>
+        </button>
+      </footer>
+    </aside>`;
 }
 
 function renderListPage(context: WhatsNewRequestContext, hasUnread: boolean): string {
@@ -192,9 +591,9 @@ function renderListPage(context: WhatsNewRequestContext, hasUnread: boolean): st
     <main class="wn-main">
       <h1 class="ds-text ds-text--heading">What's New</h1>
       <p class="ds-text ds-text--muted">Tenant: ${escapeHtml(context.tenantId ?? "unknown")}</p>
-      <p id="whats-new-status" aria-live="polite"></p>
-      <ul id="whats-new-list" class="wn-post-list"></ul>
+      <p class="ds-text ds-text--body">Use the bottom bar entry to open the update feed.</p>
     </main>
+    ${renderWhatsNewPanel()}
     ${renderBottomBar(hasUnread)}
     <div
       id="whats-new-app"
@@ -203,6 +602,7 @@ function renderListPage(context: WhatsNewRequestContext, hasUnread: boolean): st
       data-user-role="${escapeHtml(context.role ?? "ADMIN")}"
       data-tenant-id="${escapeHtml(context.tenantId ?? "")}"
       data-initial-has-unread="${String(hasUnread)}"
+      data-detail-base="/whats-new/"
     ></div>
     <script src="/whats-new/assets/client.js" defer></script>
   </body>
@@ -225,6 +625,7 @@ function renderDetailPage(context: WhatsNewRequestContext, slug: string, hasUnre
       <p id="whats-new-status" aria-live="polite"></p>
       <article id="whats-new-detail" class="wn-detail"></article>
     </main>
+    ${renderWhatsNewPanel()}
     ${renderBottomBar(hasUnread)}
     <div
       id="whats-new-app"
@@ -234,6 +635,7 @@ function renderDetailPage(context: WhatsNewRequestContext, slug: string, hasUnre
       data-user-role="${escapeHtml(context.role ?? "ADMIN")}"
       data-tenant-id="${escapeHtml(context.tenantId ?? "")}"
       data-initial-has-unread="${String(hasUnread)}"
+      data-detail-base="/whats-new/"
     ></div>
     <script src="/whats-new/assets/client.js" defer></script>
   </body>

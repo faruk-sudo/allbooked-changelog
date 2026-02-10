@@ -869,7 +869,13 @@ export class InMemoryChangelogRepository implements ChangelogRepository {
           post.visibility === "authenticated" &&
           (post.tenantId === null || post.tenantId === input.tenantScope.tenantId)
       )
-      .sort((left, right) => right.publishedAt!.localeCompare(left.publishedAt!))
+      .sort((left, right) => {
+        const publishedAtDiff = right.publishedAt!.localeCompare(left.publishedAt!);
+        if (publishedAtDiff !== 0) {
+          return publishedAtDiff;
+        }
+        return right.id.localeCompare(left.id);
+      })
       .slice(input.pagination.offset, input.pagination.offset + input.pagination.limit)
       .map((post) => ({
         id: post.id,

@@ -152,3 +152,25 @@ No PII payloads should be added when instrumentation is implemented.
   - color: `--color-primary-bg`
   - nav spacing/surface/focus behavior reuse existing primitives from `src/styles/primitives.css` (`ds-button`, focus ring tokens).
 - Accessibility: when unread is true, visually hidden copy (`New updates available`) is exposed and link `aria-label` includes the same cue.
+
+## Phase 2.2 in-app side panel feed
+
+### Decisions
+
+1. Keep the current server-rendered Express route architecture and implement `WhatsNewPanel`/`WhatsNewFeedItem` as route-level render helpers + progressive client behavior (no new bundler/runtime dependencies).
+2. Reuse existing read endpoint (`GET /api/whats-new/posts`) with `limit` + cursor-as-offset pagination; default client page size is `12`.
+3. Keep server-side feed query deterministic (`published_at DESC, id DESC`) and align in-memory repository sorting to the same order for test parity.
+4. Ensure drawer accessibility in the client controller:
+   - `role=\"dialog\"` + `aria-modal=\"true\"`
+   - close button, ESC close, overlay click close
+   - focus trap while open
+   - focus return to trigger on close
+5. Keep read-state untouched in this phase: opening the panel only reads list data and unread indicator; no read-state mutation is performed.
+
+### Styling approach
+
+- Drawer/feed UI uses design-system semantic tokens and primitives (`ds-surface`, `ds-button`, `ds-text`, `ds-stack`), with no hardcoded color values.
+- Category badge tones map to semantic intent tokens:
+  - `new` -> primary
+  - `improvement` -> success
+  - `fix` -> warning

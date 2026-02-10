@@ -65,6 +65,32 @@ export function Example() {
 }
 ```
 
+## What's New Components
+
+Phase 2.2 introduces two feature-level components for the in-app drawer feed:
+
+- `WhatsNewPanel`
+- `WhatsNewFeedItem`
+
+Implementation notes for this repo's server-rendered setup:
+
+- `src/changelog/routes.ts`:
+  - `renderWhatsNewPanel()` renders the dialog shell (`role="dialog"`, `aria-modal`, close control, loading/empty/error states, and load-more action).
+  - client-side `renderWhatsNewFeedItem(post)` renders each post card safely with text-only excerpt output and category badge.
+- `src/styles/whats-new.css` provides token-driven styling for panel layout, category badges, and feed cards while reusing primitives (`ds-surface`, `ds-button`, `ds-text`, `ds-stack`).
+
+Token dependencies used by these components:
+
+- Surfaces/borders: `--color-surface-base`, `--color-surface-raised`, `--color-surface-sunken`, `--color-border-subtle`
+- Typography: `--font-size-xs`, `--font-size-lg`, `--font-weight-semibold`, `--line-height-tight`
+- Spacing/radius: `--space-*`, `--radius-none`, `--radius-pill`
+- Badge semantics:
+  - `new`: `--color-primary-bg` / `--color-primary-fg`
+  - `improvement`: `--color-success-bg` / `--color-success-fg`
+  - `fix`: `--color-warning-bg` / `--color-warning-fg`
+- Interaction/focus: existing primitive button focus ring tokens (`--color-focus-ring`, `--color-focus-offset`)
+- Layering/shadow: `--z-overlay`, `--z-modal`, `--shadow-md`
+
 ## Adding a New Token
 
 1. Add a primitive token in `tokens.json` if the raw value is new.
