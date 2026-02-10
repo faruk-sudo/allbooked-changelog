@@ -4,6 +4,7 @@ import { appLogger, type Logger } from "../security/logger";
 import { getGuardedWhatsNewContext } from "./authz";
 import { renderMarkdownSafe } from "../security/markdown";
 import { applyWhatsNewReadGuards } from "./guards";
+import { requireCsrfToken } from "../security/csrf";
 import { parsePagination } from "./http";
 import { type ChangelogRepository, ValidationError, sanitizeSlugOrThrow } from "./repository";
 
@@ -73,6 +74,25 @@ export function createWhatsNewApiRouter(
       });
 
       res.status(200).json({ has_unread: hasUnread });
+    } catch (error) {
+      handleReadError(res, error);
+    }
+  });
+
+  router.post("/seen", requireCsrfToken, async (req: Request, res: Response) => {
+    try {
+      const context = getGuardedWhatsNewContext(req);
+      const lastSeenAt = await repository.markSeen({
+        tenantScope: { tenantId: context.tenantId },
+        userId: context.userId
+      });
+
+      logger.info("whats_new_api_seen_updated", {
+        userId: context.userId,
+        tenantId: context.tenantId
+      });
+
+      res.status(200).json({ ok: true, last_seen_at: lastSeenAt });
     } catch (error) {
       handleReadError(res, error);
     }

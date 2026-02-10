@@ -25,6 +25,7 @@ function escapeHtml(input: string): string {
 
 const CLIENT_SCRIPT = `(() => {
   const PAGE_SIZE = 12;
+  const MARK_SEEN_DEBOUNCE_MS = 60_000;
   const FOCUSABLE_SELECTOR =
     'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
@@ -38,6 +39,7 @@ const CLIENT_SCRIPT = `(() => {
     "x-user-role": appRoot.dataset.userRole || "ADMIN",
     "x-tenant-id": appRoot.dataset.tenantId || ""
   };
+  const csrfToken = appRoot.dataset.csrfToken || "csrf-token-123456";
 
   const statusEl = document.getElementById("whats-new-status");
   const unreadLinkEl = document.getElementById("whats-new-entry-link");
@@ -58,8 +60,12 @@ const CLIENT_SCRIPT = `(() => {
   const loadMoreSpinnerEl = document.getElementById("whats-new-feed-load-more-spinner");
   const detailBasePath = appRoot.dataset.detailBase || "/whats-new/";
   const dateFormatter = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
+  let hasUnreadState = appRoot.dataset.initialHasUnread === "true";
+  let lastSeenWriteAtMs = 0;
+  let markSeenPromise = null;
 
   const setUnreadIndicator = (hasUnread) => {
+    hasUnreadState = hasUnread;
     if (!unreadLinkEl || !unreadDotEl || !unreadTextEl) {
       return;
     }
@@ -90,6 +96,22 @@ const CLIENT_SCRIPT = `(() => {
     const response = await fetch(path, {
       method: "GET",
       headers
+    });
+
+    if (!response.ok) {
+      throw new Error("HTTP " + response.status);
+    }
+
+    return response.json();
+  };
+
+  const requestPostJson = async (path) => {
+    const response = await fetch(path, {
+      method: "POST",
+      headers: {
+        ...headers,
+        "x-csrf-token": csrfToken
+      }
     });
 
     if (!response.ok) {
@@ -323,9 +345,37 @@ const CLIENT_SCRIPT = `(() => {
     try {
       const payload = await requestJson("/api/whats-new/unread");
       setUnreadIndicator(Boolean(payload.has_unread));
+      return true;
     } catch {
-      setUnreadIndicator(false);
+      return false;
     }
+  };
+
+  const markSeen = async () => {
+    const now = Date.now();
+    const shouldDebounce = !hasUnreadState && now - lastSeenWriteAtMs < MARK_SEEN_DEBOUNCE_MS;
+    if (shouldDebounce) {
+      return;
+    }
+
+    if (markSeenPromise) {
+      return markSeenPromise;
+    }
+
+    markSeenPromise = (async () => {
+      try {
+        await requestPostJson("/api/whats-new/seen");
+        lastSeenWriteAtMs = Date.now();
+        setUnreadIndicator(false);
+        await refreshUnreadIndicator();
+      } catch {
+        // Fail-safe: keep current unread state when mark-seen fails.
+      } finally {
+        markSeenPromise = null;
+      }
+    })();
+
+    return markSeenPromise;
   };
 
   const getFocusableElements = () => {
@@ -402,6 +452,8 @@ const CLIENT_SCRIPT = `(() => {
     if (!feedState.hasLoadedOnce) {
       void loadFeedPage("initial");
     }
+
+    void markSeen();
   };
 
   const onPanelKeydown = (event) => {
@@ -488,8 +540,9 @@ const CLIENT_SCRIPT = `(() => {
   }
 
   (async () => {
-    setUnreadIndicator(appRoot.dataset.initialHasUnread === "true");
+    setUnreadIndicator(hasUnreadState);
     const unreadRefreshPromise = refreshUnreadIndicator();
+    const markSeenOnListPromise = appRoot.dataset.view === "list" ? markSeen() : Promise.resolve();
 
     try {
       if (appRoot.dataset.view === "detail") {
@@ -500,6 +553,7 @@ const CLIENT_SCRIPT = `(() => {
     }
 
     await unreadRefreshPromise;
+    await markSeenOnListPromise;
   })();
 })();`;
 
@@ -601,6 +655,7 @@ function renderListPage(context: WhatsNewRequestContext, hasUnread: boolean): st
       data-user-id="${escapeHtml(context.userId ?? "")}"
       data-user-role="${escapeHtml(context.role ?? "ADMIN")}"
       data-tenant-id="${escapeHtml(context.tenantId ?? "")}"
+      data-csrf-token="csrf-token-123456"
       data-initial-has-unread="${String(hasUnread)}"
       data-detail-base="/whats-new/"
     ></div>
@@ -634,6 +689,7 @@ function renderDetailPage(context: WhatsNewRequestContext, slug: string, hasUnre
       data-user-id="${escapeHtml(context.userId ?? "")}"
       data-user-role="${escapeHtml(context.role ?? "ADMIN")}"
       data-tenant-id="${escapeHtml(context.tenantId ?? "")}"
+      data-csrf-token="csrf-token-123456"
       data-initial-has-unread="${String(hasUnread)}"
       data-detail-base="/whats-new/"
     ></div>

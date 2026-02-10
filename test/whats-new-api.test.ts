@@ -219,6 +219,106 @@ describe("What's New read API", () => {
     expect(response.body.has_unread).toBe(false);
   });
 
+  it("returns unread=true when a newer publication exists after last_seen_at", async () => {
+    const repo = new InMemoryChangelogRepository(
+      [
+        {
+          id: "1",
+          tenantId: null,
+          visibility: "authenticated",
+          status: "published",
+          category: "new",
+          title: "Global update",
+          slug: "global-update",
+          bodyMarkdown: "Body",
+          publishedAt: "2026-02-03T00:00:00.000Z",
+          revision: 1
+        }
+      ],
+      [
+        {
+          tenantId: "tenant-alpha",
+          userId: "admin-1",
+          lastSeenAt: "2026-02-01T00:00:00.000Z"
+        }
+      ]
+    );
+
+    const app = createApp(createConfig(), { changelogRepository: repo });
+    const response = await withAdminHeaders(request(app).get("/api/whats-new/unread"));
+
+    expect(response.status).toBe(200);
+    expect(response.body.has_unread).toBe(true);
+  });
+
+  it("creates read_state on first /seen call and clears unread when nothing newer exists", async () => {
+    const repo = new InMemoryChangelogRepository([
+      {
+        id: "1",
+        tenantId: null,
+        visibility: "authenticated",
+        status: "published",
+        category: "new",
+        title: "Global update",
+        slug: "global-update",
+        bodyMarkdown: "Body",
+        publishedAt: "2026-02-01T00:00:00.000Z",
+        revision: 1
+      }
+    ]);
+
+    const app = createApp(createConfig(), { changelogRepository: repo });
+    const before = await withAdminHeaders(request(app).get("/api/whats-new/unread"));
+    expect(before.status).toBe(200);
+    expect(before.body.has_unread).toBe(true);
+
+    const seen = await withAdminHeaders(
+      request(app).post("/api/whats-new/seen").set("x-csrf-token", csrfToken)
+    );
+    expect(seen.status).toBe(200);
+    expect(seen.body.ok).toBe(true);
+    expect(new Date(seen.body.last_seen_at).toISOString()).toBe(seen.body.last_seen_at);
+
+    const after = await withAdminHeaders(request(app).get("/api/whats-new/unread"));
+    expect(after.status).toBe(200);
+    expect(after.body.has_unread).toBe(false);
+  });
+
+  it("updates last_seen_at on subsequent /seen calls", async () => {
+    const repo = new InMemoryChangelogRepository(
+      [
+        {
+          id: "1",
+          tenantId: null,
+          visibility: "authenticated",
+          status: "published",
+          category: "new",
+          title: "Global update",
+          slug: "global-update",
+          bodyMarkdown: "Body",
+          publishedAt: "2026-02-01T00:00:00.000Z",
+          revision: 1
+        }
+      ],
+      [
+        {
+          tenantId: "tenant-alpha",
+          userId: "admin-1",
+          lastSeenAt: "2026-01-01T00:00:00.000Z"
+        }
+      ]
+    );
+
+    const app = createApp(createConfig(), { changelogRepository: repo });
+    const seen = await withAdminHeaders(
+      request(app).post("/api/whats-new/seen").set("x-csrf-token", csrfToken)
+    );
+
+    expect(seen.status).toBe(200);
+    expect(new Date(seen.body.last_seen_at).toISOString()).toBe(seen.body.last_seen_at);
+    expect(Date.parse(seen.body.last_seen_at)).toBeGreaterThan(Date.parse("2026-01-01T00:00:00.000Z"));
+  });
+
   it("does not count other tenant posts when computing unread", async () => {
     const repo = new InMemoryChangelogRepository([
       {
@@ -260,11 +360,76 @@ describe("What's New read API", () => {
     expect(response.status).toBe(404);
   });
 
+  it("enforces tenant isolation for /seen state writes", async () => {
+    const repo = new InMemoryChangelogRepository([
+      {
+        id: "1",
+        tenantId: "tenant-beta",
+        visibility: "authenticated",
+        status: "published",
+        category: "fix",
+        title: "Tenant Beta",
+        slug: "tenant-beta-post",
+        bodyMarkdown: "Beta body",
+        publishedAt: "2026-02-03T00:00:00.000Z",
+        revision: 1
+      }
+    ]);
+
+    const app = createApp(
+      createConfig({
+        allowlistedTenantIds: new Set(["tenant-alpha", "tenant-beta"])
+      }),
+      { changelogRepository: repo }
+    );
+
+    const seenResponse = await withAdminHeaders(
+      request(app).post("/api/whats-new/seen").set("x-csrf-token", csrfToken),
+      { tenantId: "tenant-alpha" }
+    );
+    expect(seenResponse.status).toBe(200);
+
+    const unreadBeta = await withAdminHeaders(request(app).get("/api/whats-new/unread"), {
+      tenantId: "tenant-beta"
+    });
+    expect(unreadBeta.status).toBe(200);
+    expect(unreadBeta.body.has_unread).toBe(true);
+  });
+
+  it("returns 404 on /seen endpoint for non-allowlisted tenant", async () => {
+    const app = createApp(createConfig(), { changelogRepository: new InMemoryChangelogRepository() });
+    const response = await withAdminHeaders(
+      request(app).post("/api/whats-new/seen").set("x-csrf-token", csrfToken),
+      { tenantId: "tenant-beta" }
+    );
+
+    expect(response.status).toBe(404);
+  });
+
   it("returns 403 on unread endpoint for non-admin users", async () => {
     const app = createApp(createConfig(), { changelogRepository: new InMemoryChangelogRepository() });
     const response = await withAdminHeaders(request(app).get("/api/whats-new/unread"), {
       role: "USER"
     });
+
+    expect(response.status).toBe(403);
+  });
+
+  it("returns 403 on /seen endpoint for non-admin users", async () => {
+    const app = createApp(createConfig(), { changelogRepository: new InMemoryChangelogRepository() });
+    const response = await withAdminHeaders(
+      request(app).post("/api/whats-new/seen").set("x-csrf-token", csrfToken),
+      {
+        role: "USER"
+      }
+    );
+
+    expect(response.status).toBe(403);
+  });
+
+  it("returns 403 on /seen endpoint when csrf token is missing", async () => {
+    const app = createApp(createConfig(), { changelogRepository: new InMemoryChangelogRepository() });
+    const response = await withAdminHeaders(request(app).post("/api/whats-new/seen"));
 
     expect(response.status).toBe(403);
   });

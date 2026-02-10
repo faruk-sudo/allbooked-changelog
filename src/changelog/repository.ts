@@ -107,6 +107,11 @@ export interface HasUnreadInput {
   userId: string;
 }
 
+export interface MarkSeenInput {
+  tenantScope: TenantScope;
+  userId: string;
+}
+
 export interface ListAdminPostsInput {
   tenantScope: TenantScope;
   pagination: PaginationInput;
@@ -118,6 +123,7 @@ export interface ChangelogRepository {
   listPublishedPosts(input: ListPublishedInput): Promise<PublicPostSummary[]>;
   findPublishedPostBySlug(tenantScope: TenantScope, slug: string): Promise<PublicPostDetail | null>;
   hasUnreadPosts(input: HasUnreadInput): Promise<boolean>;
+  markSeen(input: MarkSeenInput): Promise<string>;
   listAdminPosts(input: ListAdminPostsInput): Promise<AdminPostSummary[]>;
   createDraftPost(input: CreatePostInput): Promise<AdminPostSummary>;
   updatePost(input: UpdatePostInput): Promise<AdminPostSummary | null>;
@@ -391,6 +397,38 @@ export class PostgresChangelogRepository implements ChangelogRepository {
     );
 
     return Boolean(result.rows[0]?.has_unread);
+  }
+
+  async markSeen(input: MarkSeenInput): Promise<string> {
+    const tenantId = input.tenantScope.tenantId.trim();
+    const userId = input.userId.trim();
+
+    if (!tenantId) {
+      throw new ValidationError("tenant_id is required");
+    }
+
+    if (!userId) {
+      throw new ValidationError("user_id is required");
+    }
+
+    const result = await this.pool.query<{ last_seen_at: Date }>(
+      `
+        INSERT INTO changelog_read_state (tenant_id, user_id, last_seen_at)
+        VALUES ($1, $2, now())
+        ON CONFLICT (tenant_id, user_id)
+        DO UPDATE
+          SET last_seen_at = EXCLUDED.last_seen_at
+        RETURNING last_seen_at
+      `,
+      [tenantId, userId]
+    );
+
+    const lastSeenAt = result.rows[0]?.last_seen_at;
+    if (!lastSeenAt) {
+      throw new Error("failed to persist read state");
+    }
+
+    return lastSeenAt.toISOString();
   }
 
   async listAdminPosts(input: ListAdminPostsInput): Promise<AdminPostSummary[]> {
@@ -944,6 +982,23 @@ export class InMemoryChangelogRepository implements ChangelogRepository {
     }
 
     return latestScopedPublication > lastSeenAt;
+  }
+
+  async markSeen(input: MarkSeenInput): Promise<string> {
+    const tenantId = input.tenantScope.tenantId.trim();
+    const userId = input.userId.trim();
+
+    if (!tenantId) {
+      throw new ValidationError("tenant_id is required");
+    }
+
+    if (!userId) {
+      throw new ValidationError("user_id is required");
+    }
+
+    const now = new Date().toISOString();
+    this.readStateByTenantAndUser.set(this.readStateKey(tenantId, userId), now);
+    return now;
   }
 
   async listAdminPosts(input: ListAdminPostsInput): Promise<AdminPostSummary[]> {

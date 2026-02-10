@@ -174,3 +174,18 @@ No PII payloads should be added when instrumentation is implemented.
   - `new` -> primary
   - `improvement` -> success
   - `fix` -> warning
+
+## Phase 2.4 read-state mutation on feed open
+
+### Decisions
+
+1. Added a dedicated read-state endpoint on the existing read router: `POST /api/whats-new/seen`.
+2. Kept authorization and rollout gating centralized through existing guards (`requireAdmin`, kill switch + tenant allowlist via `requireWhatsNewEnabled`), preserving safe `404` behavior for blocked tenants.
+3. Enforced CSRF on this mutating endpoint with existing middleware (`requireCsrfToken`); client script now sends `x-csrf-token`.
+4. Implemented server-time upsert in repository (`INSERT ... ON CONFLICT ... DO UPDATE`) keyed by `(tenant_id, user_id)` and ignored client-provided timestamps in v1.
+5. Preserved unread semantics: unread remains based on latest scoped published post timestamp (`tenant + global`, `status='published'`, `visibility='authenticated'`) compared to `last_seen_at`.
+6. Wired panel/page behavior in the existing progressive client controller:
+   - mark seen on side-panel open
+   - mark seen on list page load (`/whats-new`)
+   - debounce writes for 60s when already read to avoid toggle spam
+   - fail-safe behavior: unread dot only clears after successful `/seen`.

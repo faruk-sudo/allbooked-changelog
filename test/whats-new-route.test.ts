@@ -171,4 +171,18 @@ describe("GET /whats-new", () => {
     expect(response.text).toContain(".wn-page [hidden]");
     expect(response.text).toContain("display: none !important;");
   });
+
+  it("wires client mark-seen flow with debounce and csrf header", async () => {
+    const app = createApp(config);
+    const response = await request(app)
+      .get("/whats-new/assets/client.js")
+      .set("x-user-id", "admin-1")
+      .set("x-user-role", "ADMIN")
+      .set("x-tenant-id", "tenant-alpha");
+
+    expect(response.status).toBe(200);
+    expect(response.text).toContain("MARK_SEEN_DEBOUNCE_MS = 60_000");
+    expect(response.text).toContain("/api/whats-new/seen");
+    expect(response.text).toContain('"x-csrf-token"');
+  });
 });
