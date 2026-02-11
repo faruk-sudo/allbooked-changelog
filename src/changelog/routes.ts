@@ -4,6 +4,7 @@ import { Router, type Request, type Response } from "express";
 import { WHATS_NEW_ANALYTICS_TAXONOMY } from "../analytics/events";
 import { hashAnalyticsTenantId } from "../analytics/tracker";
 import type { AppConfig } from "../config";
+import { createWhatsNewHtmlSecurityHeaders } from "../security/headers";
 import { appLogger, type Logger } from "../security/logger";
 import { renderMarkdownSafe } from "../security/markdown";
 import { getGuardedWhatsNewContext } from "./authz";
@@ -1124,6 +1125,7 @@ export function createWhatsNewRouter(
     res.status(200).type("text/css").send(STYLESHEET);
   });
 
+  router.use(createWhatsNewHtmlSecurityHeaders(config));
   applyWhatsNewReadGuards(router, config);
 
   router.get("/", async (req: Request, res: Response) => {

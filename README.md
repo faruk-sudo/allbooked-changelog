@@ -64,6 +64,10 @@ curl -i http://localhost:3000/whats-new \
 - `WHATS_NEW_DEV_USER_ROLE`: fallback role (`ADMIN` or `USER`) when dev auth bypass is enabled
 - `WHATS_NEW_DEV_TENANT_ID`: fallback tenant ID when dev auth bypass is enabled
 - `WHATS_NEW_DEV_USER_EMAIL`: optional fallback email when dev auth bypass is enabled
+- `WHATS_NEW_CSP_REPORT_ONLY`: `true|false`; toggles CSP report-only mode (`true` by default outside production)
+- `CSP_FRAME_ANCESTORS`: comma-separated frame ancestor sources (default `'none'`; example `'self',https://www.example.com`)
+- `CSP_CONNECT_SRC`: comma-separated `connect-src` sources (default `'self'`)
+- `CSP_IMG_SRC`: comma-separated `img-src` sources (default `'self',data:,https:`)
 - `DATABASE_URL`: PostgreSQL connection string for migrations/seeding/smoke checks
 - `DATABASE_SSL`: `true|false` (default `false`) for DB TLS
 - `DATABASE_SSL_REJECT_UNAUTHORIZED`: `true|false` (default `true`) when TLS is enabled
@@ -83,10 +87,42 @@ curl -i http://localhost:3000/whats-new \
 - Tenant context and allowlist gate enforced server-side
 - Non-allowlisted tenants receive `404`
 - Publisher allowlist gate enforced on admin CRUD endpoints
-- CSP/security headers via Helmet for `/whats-new` routes
+- Security headers + strict CSP on HTML routes under `/whats-new*` and `/admin/whats-new*`
 - Markdown rendering blocks raw HTML and sanitizes output
 - Logging is structured and safe by default (redacts body fields, auth/cookie headers, and secret-like values)
 - CSRF token required on mutating admin endpoints
+
+## Security headers and CSP
+- Applied on HTML responses for What’s New reader/publisher surfaces (`/whats-new*`, `/admin/whats-new*`).
+- Baseline headers:
+  - `X-Content-Type-Options: nosniff`
+  - `Referrer-Policy: strict-origin-when-cross-origin`
+  - `Permissions-Policy: geolocation=(), microphone=(), camera=(), payment=()`
+  - `X-Frame-Options: DENY`
+  - `Cross-Origin-Opener-Policy: same-origin`
+  - `Cross-Origin-Resource-Policy: same-site`
+  - `Strict-Transport-Security` only in production
+- CSP defaults (strict):
+  - `default-src 'none'`
+  - `base-uri 'none'`
+  - `object-src 'none'`
+  - `frame-ancestors` from `CSP_FRAME_ANCESTORS` (default `'none'`)
+  - `script-src 'self'`
+  - `style-src 'self'`
+  - `img-src` from `CSP_IMG_SRC` (default `'self' data: https:`)
+  - `font-src 'self' data: https:`
+  - `connect-src` from `CSP_CONNECT_SRC` (default `'self'`)
+  - `frame-src 'none'`
+  - `form-action 'self'`
+  - `upgrade-insecure-requests` in production
+- Environment behavior:
+  - Production enforces `Content-Security-Policy` by default.
+  - Non-production defaults to `Content-Security-Policy-Report-Only` to reduce local tooling breakage risk.
+  - `WHATS_NEW_CSP_REPORT_ONLY` can override either mode for staged rollout.
+- Safe extension guidance:
+  - Prefer explicit origins over wildcards (for example, `https://api.example.com` instead of `https:` or `*` for `connect-src`).
+  - Keep `frame-ancestors` strict (`'none'` or minimal trusted origins).
+  - Avoid `unsafe-inline` and `unsafe-eval` in production; they materially weaken XSS protections.
 
 ## Database setup and migrations
 1. Start PostgreSQL locally and ensure `DATABASE_URL` points to an existing database.

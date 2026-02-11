@@ -51,4 +51,30 @@ describe("loadConfig", () => {
 
     expect(config.devAuthBypassEnabled).toBe(false);
   });
+
+  it("defaults CSP to report-only outside production with strict ancestors", () => {
+    const config = loadConfig({
+      NODE_ENV: "development"
+    });
+
+    expect(config.securityHeaders?.isProduction).toBe(false);
+    expect(config.securityHeaders?.cspReportOnly).toBe(true);
+    expect(config.securityHeaders?.cspFrameAncestors).toEqual(["'none'"]);
+  });
+
+  it("parses CSP source list overrides from env", () => {
+    const config = loadConfig({
+      NODE_ENV: "production",
+      WHATS_NEW_CSP_REPORT_ONLY: "false",
+      CSP_FRAME_ANCESTORS: "'self', https://www.example.com",
+      CSP_CONNECT_SRC: "'self', https://api.example.com",
+      CSP_IMG_SRC: "'self', data:, https:"
+    });
+
+    expect(config.securityHeaders?.isProduction).toBe(true);
+    expect(config.securityHeaders?.cspReportOnly).toBe(false);
+    expect(config.securityHeaders?.cspFrameAncestors).toEqual(["'self'", "https://www.example.com"]);
+    expect(config.securityHeaders?.cspConnectSrc).toEqual(["'self'", "https://api.example.com"]);
+    expect(config.securityHeaders?.cspImgSrc).toEqual(["'self'", "data:", "https:"]);
+  });
 });

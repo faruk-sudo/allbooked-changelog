@@ -1,5 +1,13 @@
 import type { UserRole } from "./types/context";
 
+export interface SecurityHeadersConfig {
+  isProduction: boolean;
+  cspReportOnly: boolean;
+  cspFrameAncestors: string[];
+  cspConnectSrc: string[];
+  cspImgSrc: string[];
+}
+
 export interface AppConfig {
   port: number;
   whatsNewKillSwitch: boolean;
@@ -12,6 +20,7 @@ export interface AppConfig {
   devAuthBypassUserRole: UserRole;
   devAuthBypassTenantId: string;
   devAuthBypassUserEmail?: string;
+  securityHeaders?: Partial<SecurityHeadersConfig>;
 }
 
 function parseBoolean(value: string | undefined, defaultValue: boolean): boolean {
@@ -45,6 +54,41 @@ function parseUserRole(value: string | undefined, defaultValue: UserRole): UserR
   return defaultValue;
 }
 
+function parseCsvList(value: string | undefined): string[] {
+  return (value ?? "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+}
+
+function normalizeCspSource(source: string): string {
+  const trimmed = source.trim();
+  const withoutQuotes = trimmed.replace(/^'(.*)'$/, "$1").toLowerCase();
+
+  if (withoutQuotes === "none") {
+    return "'none'";
+  }
+  if (withoutQuotes === "self") {
+    return "'self'";
+  }
+  if (withoutQuotes === "unsafe-inline") {
+    return "'unsafe-inline'";
+  }
+  if (withoutQuotes === "unsafe-eval") {
+    return "'unsafe-eval'";
+  }
+  if (withoutQuotes === "strict-dynamic") {
+    return "'strict-dynamic'";
+  }
+
+  return trimmed;
+}
+
+function parseCspSourceList(value: string | undefined, fallback: string[]): string[] {
+  const parsed = parseCsvList(value).map(normalizeCspSource);
+  return parsed.length > 0 ? parsed : fallback;
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const parseCsvSet = (value: string | undefined, normalize?: (item: string) => string): Set<string> =>
     new Set(
@@ -72,6 +116,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const devAuthBypassUserRole = parseUserRole(env.WHATS_NEW_DEV_USER_ROLE, "ADMIN");
 
   const isProduction = (env.NODE_ENV ?? "").toLowerCase() === "production";
+  const cspReportOnly = parseBoolean(env.WHATS_NEW_CSP_REPORT_ONLY, !isProduction);
+  const cspFrameAncestors = parseCspSourceList(env.CSP_FRAME_ANCESTORS, ["'none'"]);
+  const cspConnectSrc = parseCspSourceList(env.CSP_CONNECT_SRC, ["'self'"]);
+  const cspImgSrc = parseCspSourceList(env.CSP_IMG_SRC, ["'self'", "data:", "https:"]);
   const devBypassDefault = !isProduction;
   const requestedDevBypass = parseBoolean(env.WHATS_NEW_DEV_AUTH_BYPASS, devBypassDefault);
   const devAuthBypassEnabled = !isProduction && requestedDevBypass;
@@ -105,6 +153,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     devAuthBypassUserId,
     devAuthBypassUserRole,
     devAuthBypassTenantId,
-    devAuthBypassUserEmail
+    devAuthBypassUserEmail,
+    securityHeaders: {
+      isProduction,
+      cspReportOnly,
+      cspFrameAncestors,
+      cspConnectSrc,
+      cspImgSrc
+    }
   };
 }

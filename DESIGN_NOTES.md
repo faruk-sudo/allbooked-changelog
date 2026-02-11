@@ -304,3 +304,33 @@ All styling remains token-driven via semantic variables (`--color-*`, `--space-*
    - `5xx` -> generic retry message
 6. Kept server-side authorization/tenant/CSRF guards unchanged and added minimal failure telemetry in admin routes (`route`, `actorId`, `tenantId`, `postId`, `statusCode`, `errorType`) without request bodies or markdown content.
 7. Documented publisher allowlist operations as env-only (no UI management in MVP) in `README.md` and `.env.example` comments.
+
+## Phase 4.1 security headers + CSP hardening
+
+### Decisions
+
+1. Replaced the static Helmet config with a centralized, env-aware builder in `src/security/headers.ts` so directives remain readable and auditable in one place.
+2. Scoped CSP/header middleware to What’s New HTML surfaces only (`/whats-new*`, `/admin/whats-new*`) by attaching it inside reader/publisher routers and removing it from shared API guards.
+3. Hardened default CSP posture:
+   - `default-src 'none'`
+   - `base-uri 'none'`
+   - `object-src 'none'`
+   - `frame-ancestors` configurable, default `'none'`
+   - `script-src 'self'` and `style-src 'self'` (no `unsafe-inline`/`unsafe-eval` in production)
+4. Added baseline response headers via Helmet for HTML routes:
+   - `X-Content-Type-Options: nosniff`
+   - `Referrer-Policy: strict-origin-when-cross-origin`
+   - `Permissions-Policy` disables geolocation/microphone/camera/payment
+   - `X-Frame-Options: DENY`
+   - `Cross-Origin-Opener-Policy: same-origin`
+   - `Cross-Origin-Resource-Policy: same-site`
+   - `Strict-Transport-Security` enabled only in production
+5. Chose environment-aware CSP behavior for safer rollout:
+   - production defaults to enforced CSP
+   - non-production defaults to `Content-Security-Policy-Report-Only`
+   - `WHATS_NEW_CSP_REPORT_ONLY` allows explicit override in any environment
+6. Added future-proof configuration knobs with safe defaults in `loadConfig` and `.env.example`:
+   - `CSP_FRAME_ANCESTORS`
+   - `CSP_CONNECT_SRC`
+   - `CSP_IMG_SRC`
+7. Added automated route tests validating header presence and key CSP directives, including enforce vs report-only toggle coverage.

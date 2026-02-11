@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { Router, type Request, type Response } from "express";
 import type { AppConfig } from "../config";
+import { createWhatsNewHtmlSecurityHeaders } from "../security/headers";
 import { appLogger, type Logger } from "../security/logger";
 import { getGuardedWhatsNewContext } from "./authz";
 import { applyWhatsNewPublisherGuards } from "./guards";
@@ -1845,6 +1846,7 @@ export function createWhatsNewPublisherRouter(
     res.status(200).type("text/css").send(STYLESHEET);
   });
 
+  router.use(createWhatsNewHtmlSecurityHeaders(config));
   applyWhatsNewPublisherGuards(router, config);
 
   router.get("/", (req: Request, res: Response) => {
