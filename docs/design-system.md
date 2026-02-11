@@ -8,9 +8,51 @@ This repo uses a token-first model with two layers:
 2. `semantic` tokens in `tokens.json`
 
 Primitive tokens define raw values (palette, spacing, radii, typography, shadows, z-index).  
-Semantic tokens map intent (`bg`, `surface`, `text`, `border`, `primary`, `secondary`, `danger`, `success`, `warning`, `focus`, `disabled`) to primitives and support theme overrides (`light`, `dark`).
+Semantic tokens map intent (`bg`, `surface`, `text`, `muted`, `border`, `primary`, `secondary`, `link`, `danger`, `success`, `warning`, `info`, `focus`, `disabled`) to primitives and support theme overrides (`light`, `dark`).
 
 Use semantic tokens in components. Avoid direct primitive color usage in component CSS.
+
+## Neutral Palette (v2)
+
+The color foundation is neutral-first and intentionally monochrome for most UI chrome:
+
+- `neutral.50` `#f8f8f9` -> app canvas
+- `neutral.0` `#ffffff` -> base surface
+- `neutral.100` `#f1f1f2` -> subtle/sunken surfaces
+- `neutral.200` `#e4e4e7` and `neutral.300` `#d4d4d8` -> borders
+- `neutral.600` `#52525b` -> muted foreground
+- `neutral.900` `#18181b` and `neutral.950` `#09090b` -> primary foreground + primary actions
+
+Status colors stay available and intentionally restrained (for affordance and accessibility, not brand dominance):
+
+- `success.*` -> muted green
+- `warning.*` -> muted amber
+- `danger.*` -> muted red
+- `info.*` -> muted blue
+
+Dark mode uses the same token names with semantic overrides in `semantic.dark`.
+
+## Semantic Mapping (Core)
+
+Core semantic tokens consumed by components:
+
+- `--color-bg-canvas`, `--color-bg-subtle`
+- `--color-surface-base`, `--color-surface-raised`, `--color-surface-sunken`
+- `--color-text-primary`, `--color-text-muted`, `--color-text-inverse`
+- `--color-muted-bg`, `--color-muted-fg`
+- `--color-border-default`, `--color-border-strong`, `--color-border-subtle`
+- `--color-primary-*`, `--color-secondary-*`, `--color-link-*`
+- `--color-danger-*`, `--color-success-*`, `--color-warning-*`, `--color-info-*`
+- `--color-focus-ring`, `--color-focus-offset`
+- `--color-disabled-*`
+
+State coverage is semantic and explicit (`hover`, `active`, `disabled`) so component styles do not need raw values.
+
+## Component Color Rule
+
+- Raw color values (`#hex`, `rgb`, `hsl`, named colors) are allowed only in token sources (`tokens.json`) and generated token output (`src/styles/tokens.css`).
+- Component/feature styles must use semantic variables (`var(--color-...)`).
+- New UI color requirements should be implemented by extending semantic tokens first, then consumed by components.
 
 ## Token to CSS Variables
 
@@ -141,6 +183,20 @@ Feature component map:
 2. Add or update semantic aliases in `tokens.json` (`semantic.light`, and `semantic.dark` if needed).
 3. Run `node scripts/generate-token-css.mjs` to regenerate `src/styles/tokens.css`.
 4. Consume the semantic variable in component CSS (`src/styles/primitives.css` or feature CSS).
+
+## Migration Notes (Neutral Refresh)
+
+- Primary/action tokens were remapped from blue-accented values to neutral monochrome values.
+- Link styling now uses dedicated semantic link tokens (`--color-link-fg`, `--color-link-hover`) instead of reusing primary button tokens.
+- Functional status tokens (`danger/success/warning/info`) remain non-neutral for usability and are intentionally less saturated.
+- Button variants now include semantic `active` states in addition to existing `hover` and `disabled`.
+
+To add a future brand accent with minimal churn:
+
+1. Add an accent primitive scale in `tokens.json` (for example `primitive.color.accent`).
+2. Remap `semantic.light.primary`, `semantic.dark.primary`, and optional `semantic.*.link`.
+3. Regenerate `src/styles/tokens.css`.
+4. No component refactor is needed if semantic token names stay stable.
 
 ## Accessibility Notes
 

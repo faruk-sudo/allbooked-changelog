@@ -393,7 +393,14 @@
 }
 
 .wn-admin-editor-preview-body a {
-  color: var(--color-primary-bg);
+  color: var(--color-link-fg);
+  text-decoration-thickness: 1px;
+  text-underline-offset: var(--space-1);
+}
+
+.wn-admin-editor-preview-body a:hover {
+  color: var(--color-link-hover);
+  text-decoration-thickness: 2px;
 }
 
 .wn-admin-editor-actions {

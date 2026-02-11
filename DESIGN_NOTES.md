@@ -46,6 +46,23 @@ The repository was empty at implementation time, so no existing UI stack, stylin
 - Chose a hand-rolled generator over an external token package to avoid dependency overhead while preserving a clear upgrade path.
 - Primitive components are framework-agnostic enough for most React builds but not tied to any one app entrypoint because no existing app structure was present.
 
+## Design system neutral refresh (February 11, 2026)
+
+### Decisions
+
+1. Kept the existing token pipeline (`tokens.json` -> `scripts/generate-token-css.mjs` -> `src/styles/tokens.css`) and avoided a theming-engine rewrite.
+2. Introduced a neutral-first primitive scale (`neutral.0` to `neutral.950`) and remapped semantic light/dark tokens so backgrounds, surfaces, borders, text, focus, and primary actions are monochrome by default.
+3. Added semantic state/link/status coverage needed by components:
+   - `link` tokens for text links (separate from button-primary)
+   - `active` tokens for button/action states
+   - retained `danger/success/warning` and added `info` to preserve functional affordances.
+4. Preserved token purity by keeping raw color literals in token files only and updating component styles to consume semantic variables.
+
+### Tradeoffs
+
+- We kept status colors muted rather than fully monochrome because removing color from all status affordances would reduce scanability and increase accessibility risk.
+- We used neutral focus rings (instead of brand accent rings) to fit the monochrome goal while remaining visible in both light and dark themes.
+
 ## Phase 1.1 DB schema (What's New)
 
 ### Decisions

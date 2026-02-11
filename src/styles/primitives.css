@@ -47,6 +47,10 @@
   transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease, box-shadow 120ms ease;
 }
 
+.ds-button:hover:not(:disabled) {
+  box-shadow: var(--shadow-xs);
+}
+
 .ds-button:focus-visible {
   outline: 2px solid var(--color-focus-ring);
   outline-offset: 2px;
@@ -71,6 +75,11 @@
   border-color: var(--color-primary-hover);
 }
 
+.ds-button--primary:active:not(:disabled) {
+  background: var(--color-primary-active);
+  border-color: var(--color-primary-active);
+}
+
 .ds-button--secondary {
   background: var(--color-secondary-bg);
   border-color: var(--color-secondary-border);
@@ -81,6 +90,10 @@
   background: var(--color-secondary-hover);
 }
 
+.ds-button--secondary:active:not(:disabled) {
+  background: var(--color-secondary-active);
+}
+
 .ds-button--ghost {
   background: transparent;
   border-color: transparent;
@@ -88,7 +101,11 @@
 }
 
 .ds-button--ghost:hover:not(:disabled) {
-  background: var(--color-bg-subtle);
+  background: var(--color-muted-bg);
+}
+
+.ds-button--ghost:active:not(:disabled) {
+  background: var(--color-surface-sunken);
 }
 
 .ds-surface {
