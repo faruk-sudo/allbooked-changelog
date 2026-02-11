@@ -432,3 +432,21 @@ SELECT EXISTS (
 
 - This phase prioritized correctness, bounded query work, and payload reductions first.
 - Caching rendered HTML safely will require explicit invalidation keys (revision + tenant scope + visibility + sanitizer/version), which is better handled in a later phase to avoid stale/cross-scope content risk.
+
+## Phase 4C (4.4 + 4.5) operational readiness package
+
+### Decisions
+
+1. Added explicit operations runbooks under `docs/ops/`:
+   - `backup-restore.md` for Postgres backup/restore + validation drills
+   - `observability.md` for baseline monitoring, alerts, and logging safety rules
+2. Upgraded existing `GET /healthz` from static response to dependency-aware health:
+   - response shape is now `{ ok: true|false }`
+   - server wiring performs DB ping (`SELECT 1`) through an injected `healthCheck` dependency
+   - failure returns `503` without disclosing internal config
+3. Kept instrumentation lightweight:
+   - no new metrics framework introduced in this phase
+   - documented future metrics integration approach instead
+4. Validation-first posture:
+   - executed local backup/restore drill on February 11, 2026
+   - validated restore with migration idempotency check, smoke-check, table count checks, and live read endpoint probes

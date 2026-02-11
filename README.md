@@ -130,25 +130,35 @@ curl -i http://localhost:3000/whats-new \
   - Avoid `unsafe-inline` and `unsafe-eval` in production; they materially weaken XSS protections.
 
 ## Database setup and migrations
-1. Start PostgreSQL locally and ensure `DATABASE_URL` points to an existing database.
-2. Run schema migrations:
+1. Start PostgreSQL locally (Docker example):
+```bash
+docker run --name allbooked-changelog-pg \
+  -e POSTGRES_PASSWORD=postgres \
+  -e POSTGRES_USER=postgres \
+  -e POSTGRES_DB=allbooked_changelog \
+  -p 5432:5432 \
+  -d postgres:16
+```
+2. Ensure `DATABASE_URL` points to an existing database.
+If port `5432` is already in use, run Postgres on `5433` and update `DATABASE_URL` accordingly.
+3. Run schema migrations:
 ```bash
 npm run db:migrate
 ```
-3. (Optional, dev-only) seed sample published changelog posts:
+4. (Optional, dev-only) seed sample published changelog posts:
 ```bash
 npm run db:seed:dev
 ```
-4. (Optional) inspect read-query plans:
+5. (Optional) inspect read-query plans:
 ```bash
 npm run db:explain:reads
 ```
 Set `EXPLAIN_TENANT_ID`, `EXPLAIN_USER_ID`, `EXPLAIN_SLUG`, `EXPLAIN_FEED_LIMIT`, `EXPLAIN_CURSOR_PUBLISHED_AT`, and `EXPLAIN_CURSOR_ID` to override defaults.
-5. (Optional) roll back most recent migration:
+6. (Optional) roll back most recent migration:
 ```bash
 npm run db:migrate:down
 ```
-6. (Optional) roll back multiple migrations:
+7. (Optional) roll back multiple migrations:
 ```bash
 npm run db:migrate:down -- 2
 ```
@@ -165,6 +175,10 @@ The smoke check verifies:
 - post title is required
 - post slug uniqueness is enforced
 - read-state uniqueness on `(tenant_id, user_id)` is enforced
+
+## Ops runbooks
+- Backup/restore and DR drill: `docs/ops/backup-restore.md`
+- Observability baseline and alert starters: `docs/ops/observability.md`
 
 ## API endpoints
 Read API (admin + allowlisted tenant):

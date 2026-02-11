@@ -6,7 +6,12 @@ import { createDatabasePool } from "./db/connection";
 const config = loadConfig();
 const databasePool = createDatabasePool();
 const repository = new PostgresChangelogRepository(databasePool);
-const app = createApp(config, { changelogRepository: repository });
+const app = createApp(config, {
+  changelogRepository: repository,
+  healthCheck: async () => {
+    await databasePool.query("SELECT 1");
+  }
+});
 
 app.listen(config.port, () => {
   console.info(`allbooked-changelog listening on port ${config.port}`);

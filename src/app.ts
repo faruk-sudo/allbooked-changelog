@@ -12,6 +12,7 @@ export interface AppDependencies {
   logger?: Logger;
   changelogRepository?: ChangelogRepository;
   rateLimitStore?: RateLimitStore;
+  healthCheck?: () => Promise<void> | void;
 }
 
 function createFallbackRepository(): ChangelogRepository {
@@ -49,12 +50,20 @@ export function createApp(config: AppConfig, dependencies: AppDependencies = {})
   const logger = dependencies.logger ?? appLogger;
   const changelogRepository = dependencies.changelogRepository ?? createFallbackRepository();
   const rateLimitStore = dependencies.rateLimitStore ?? new InMemoryRateLimitStore();
+  const healthCheck = dependencies.healthCheck ?? (() => undefined);
 
   app.disable("x-powered-by");
   app.use(express.json({ limit: "128kb" }));
 
-  app.get("/healthz", (_req, res) => {
-    res.status(200).json({ status: "ok" });
+  app.get("/healthz", async (_req, res) => {
+    try {
+      await healthCheck();
+      res.status(200).json({ ok: true });
+      return;
+    } catch (error) {
+      logger.info("health_check_failed", { error });
+      res.status(503).json({ ok: false });
+    }
   });
 
   app.get("/", (_req, res) => {
