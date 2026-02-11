@@ -117,6 +117,10 @@ export interface ListPublishedInput {
   pagination: PublicFeedPaginationInput;
 }
 
+export interface ListPublicPostsInput {
+  pagination: PaginationInput;
+}
+
 export interface HasUnreadInput {
   tenantScope: TenantScope;
   userId: string;
@@ -138,6 +142,8 @@ export interface ListAdminPostsInput {
 export interface ChangelogRepository {
   listPublishedPosts(input: ListPublishedInput): Promise<PublicPostSummary[]>;
   findPublishedPostBySlug(tenantScope: TenantScope, slug: string): Promise<PublicPostDetail | null>;
+  listPublicPosts(input: ListPublicPostsInput): Promise<PublicPostSummary[]>;
+  findPublicPostBySlug(slug: string): Promise<PublicPostDetail | null>;
   findAdminPostById(input: { tenantScope: TenantScope; id: string }): Promise<AdminPostDetail | null>;
   hasUnreadPosts(input: HasUnreadInput): Promise<boolean>;
   markSeen(input: MarkSeenInput): Promise<string>;
@@ -476,6 +482,79 @@ export class PostgresChangelogRepository implements ChangelogRepository {
         LIMIT 1
       `,
       [slug, tenantScope.tenantId]
+    );
+
+    const row = result.rows[0];
+    if (!row || !row.published_at) {
+      return null;
+    }
+
+    return {
+      id: row.id,
+      title: row.title,
+      slug: row.slug,
+      category: row.category,
+      publishedAt: row.published_at.toISOString(),
+      tenantId: row.tenant_id,
+      bodyMarkdown: row.body_markdown
+    };
+  }
+
+  async listPublicPosts(input: ListPublicPostsInput): Promise<PublicPostSummary[]> {
+    const result = await this.pool.query<PublishedSummaryRow>(
+      `
+        SELECT
+          id,
+          category,
+          title,
+          slug,
+          published_at,
+          left(body_markdown, 1200) AS excerpt_source
+        FROM changelog_posts
+        WHERE status = 'published'
+          AND visibility = 'public'
+          AND published_at IS NOT NULL
+          AND tenant_id IS NULL
+        ORDER BY published_at DESC, id DESC
+        LIMIT $1 OFFSET $2
+      `,
+      [input.pagination.limit, input.pagination.offset]
+    );
+
+    return result.rows.map((row) => ({
+      id: row.id,
+      title: row.title,
+      slug: row.slug,
+      category: row.category,
+      publishedAt: row.published_at.toISOString(),
+      excerpt: createExcerpt(row.excerpt_source)
+    }));
+  }
+
+  async findPublicPostBySlug(slug: string): Promise<PublicPostDetail | null> {
+    const result = await this.pool.query<PostRow>(
+      `
+        SELECT
+          id,
+          tenant_id,
+          visibility,
+          status,
+          category,
+          title,
+          slug,
+          body_markdown,
+          published_at,
+          created_at,
+          updated_at,
+          revision
+        FROM changelog_posts
+        WHERE slug = $1
+          AND status = 'published'
+          AND visibility = 'public'
+          AND tenant_id IS NULL
+        LIMIT 1
+      `,
+      [slug]
     );
 
     const row = result.rows[0];
@@ -1102,6 +1181,50 @@ export class InMemoryChangelogRepository implements ChangelogRepository {
         candidate.status === "published" &&
         candidate.visibility === "authenticated" &&
         (candidate.tenantId === null || candidate.tenantId === tenantScope.tenantId)
+    );
+
+    if (!post || !post.publishedAt) {
+      return null;
+    }
+
+    return {
+      id: post.id,
+      title: post.title,
+      slug: post.slug,
+      category: post.category,
+      publishedAt: post.publishedAt,
+      tenantId: post.tenantId,
+      bodyMarkdown: post.bodyMarkdown
+    };
+  }
+
+  async listPublicPosts(input: ListPublicPostsInput): Promise<PublicPostSummary[]> {
+    return this.posts
+      .filter(
+        (post) => post.status === "published" && post.visibility === "public" && post.tenantId === null && post.publishedAt
+      )
+      .sort((left, right) => {
+        const publishedAtDiff = (right.publishedAt ?? "").localeCompare(left.publishedAt ?? "");
+        if (publishedAtDiff !== 0) {
+          return publishedAtDiff;
+        }
+        return right.id.localeCompare(left.id);
+      })
+      .slice(input.pagination.offset, input.pagination.offset + input.pagination.limit)
+      .map((post) => ({
+        id: post.id,
+        title: post.title,
+        slug: post.slug,
+        category: post.category,
+        publishedAt: post.publishedAt ?? new Date(0).toISOString(),
+        excerpt: createExcerpt(post.bodyMarkdown)
+      }));
+  }
+
+  async findPublicPostBySlug(slug: string): Promise<PublicPostDetail | null> {
+    const post = this.posts.find(
+      (candidate) =>
+        candidate.slug === slug && candidate.status === "published" && candidate.visibility === "public" && candidate.tenantId === null
     );
 
     if (!post || !post.publishedAt) {

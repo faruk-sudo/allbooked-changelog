@@ -32,7 +32,8 @@ npm run dev
 - Health: `http://localhost:3000/healthz`
 - What's New: `http://localhost:3000/whats-new`
 - What's New detail: `http://localhost:3000/whats-new/:slug`
-- Public changelog placeholder (disabled by default): `http://localhost:3000/changelog`
+- Public changelog list (disabled by default): `http://localhost:3000/changelog`
+- Public changelog detail: `http://localhost:3000/changelog/:slug`
 
 ## Required request headers (stub auth/tenant context)
 The current implementation uses headers as an auth/tenant stub until real SSO is integrated.
@@ -103,7 +104,7 @@ curl -i http://localhost:3000/whats-new \
 - Publisher allowlist gate enforced on admin CRUD endpoints
 - Security headers + strict CSP on HTML routes under `/whats-new*` and `/admin/whats-new*`
 - Public changelog remains hidden by default (`/changelog` returns `404` unless explicitly enabled)
-- Public placeholder responses use shared-cache-friendly headers (`Cache-Control: public, max-age=60, s-maxage=300, stale-while-revalidate=600`)
+- Public changelog HTML responses use shared-cache-friendly headers (`Cache-Control: public, max-age=60, s-maxage=300, stale-while-revalidate=600`)
 - Markdown rendering blocks raw HTML and sanitizes output
 - Logging is structured and safe by default (redacts body fields, auth/cookie headers, and secret-like values)
 - CSRF token required on mutating admin endpoints
@@ -220,24 +221,38 @@ Admin API (admin + allowlisted tenant + publisher allowlist + CSRF token for mut
   - `Cache-Control: private, max-age=30, stale-while-revalidate=60`
   - `Vary: Authorization, x-user-id, x-tenant-id`
   - weak `ETag`; matching `If-None-Match` requests return `304`.
-- Public HTML changelog placeholder (`/changelog`) returns:
+- Public HTML changelog pages (`/changelog`, `/changelog/:slug`) return:
   - `Cache-Control: public, max-age=60, s-maxage=300, stale-while-revalidate=600`
   - optional `X-Robots-Tag: noindex, nofollow` when `PUBLIC_CHANGELOG_NOINDEX=true`
 - Production note: current limiter store is in-memory and therefore per app instance. Multi-instance deployments should use a shared store (for example Redis) to keep limits globally consistent.
 
-## Public surface readiness (Phase 5A bridge)
+## Public surface rollout (Phase 5B)
 - Default-safe rollout posture:
   - `PUBLIC_CHANGELOG_ENABLED=false`
   - `PUBLIC_CHANGELOG_NOINDEX=true`
-- Public policy boundary for future `/changelog` and `/rss` content:
+- Public route implementation:
+  - list page: `GET /changelog`
+  - detail page: `GET /changelog/:slug`
+  - implementation: `src/changelog/public-routes.ts`
+  - data access: `listPublicPosts` and `findPublicPostBySlug` in `src/changelog/repository.ts`
+- Public policy boundary:
   - `status='published'`
   - `visibility='public'`
   - `tenant_id IS NULL` (global-only MVP public scope)
 - Public routes reject `status`/`visibility`/`tenant_id` query overrides to avoid policy bypass from request parameters.
+- Pagination behavior:
+  - query params: `page` and `limit`
+  - server cap: `limit <= 50`
+  - ordering: `published_at DESC, id DESC`
+- Caching rationale:
+  - public pages are cacheable at CDN/shared layers
+  - short `max-age` + `s-maxage` + `stale-while-revalidate` reduces origin load while keeping updates fresh
 - Recommended staging rollout:
   1. Enable `PUBLIC_CHANGELOG_ENABLED=true`
   2. Keep `PUBLIC_CHANGELOG_NOINDEX=true`
   3. Verify headers with `curl -I http://localhost:3000/changelog`
+  4. Verify detail headers with `curl -I http://localhost:3000/changelog/<public-slug>`
+  5. Disable noindex only when public launch is ready (`PUBLIC_CHANGELOG_NOINDEX=false`)
 
 Audit log behavior:
 - All state-changing admin endpoints write to `changelog_audit_log`.
@@ -247,6 +262,7 @@ Audit log behavior:
 - `src/server.ts` uses Postgres-backed changelog repository (`changelog_posts`, `changelog_audit_log`, `changelog_read_state`).
 - `/whats-new` renders the list feed client-side from `GET /api/whats-new/posts`.
 - `/whats-new/:slug` resolves on the server, enforces published/authenticated + tenant scope, and renders markdown through the shared sanitization pipeline.
+- `/changelog` and `/changelog/:slug` resolve on the server, enforce published/public/global-only scope, and render markdown through the same sanitization pipeline used by What’s New.
 
 ## Tests
 Run unit tests:

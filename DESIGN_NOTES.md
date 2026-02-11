@@ -493,3 +493,30 @@ SELECT EXISTS (
    - returns `404` when disabled to avoid feature discovery
    - returns simple HTML placeholder when enabled with no public content exposure
    - applies same strict HTML CSP as existing What’s New surfaces when `PUBLIC_SURFACE_CSP_ENABLED=true`
+
+## Phase 5B (5.1) public HTML changelog list + detail
+
+### Decisions
+
+1. Replaced the Phase 5A placeholder with real public pages:
+   - `GET /changelog` list page
+   - `GET /changelog/:slug` detail page
+   - implementation in `src/changelog/public-routes.ts`
+2. Enforced the public boundary in repository reads (not only in route middleware):
+   - `status='published'`
+   - `visibility='public'`
+   - `tenant_id IS NULL` (global-only MVP)
+   - new repository APIs: `listPublicPosts` and `findPublicPostBySlug` in `src/changelog/repository.ts`
+3. Reused the same markdown sanitization pipeline as authenticated surfaces:
+   - detail pages render via `renderMarkdownSafe` (`src/security/markdown.ts`)
+   - no separate sanitizer config was introduced
+4. Kept safe rollout controls from Phase 5A and applied them consistently:
+   - readiness gate (`PUBLIC_CHANGELOG_ENABLED`) returns safe `404` when off
+   - noindex header/meta (`PUBLIC_CHANGELOG_NOINDEX`)
+   - shared public cache headers (`public, max-age=60, s-maxage=300, stale-while-revalidate=600`)
+   - strict HTML CSP reuse for `/changelog*` when `PUBLIC_SURFACE_CSP_ENABLED=true`
+5. Implemented simple server-rendered page pagination for the public list:
+   - query params: `page`, `limit`
+   - hard cap: `limit <= 50`
+   - ordering: `published_at DESC, id DESC`
+6. Added a dedicated token-based public stylesheet (`src/styles/public-changelog.css`) that follows the neutral design tokens and preserves accessible focus/link states.

@@ -136,6 +136,25 @@ Token dependencies used by these components:
 - Interaction/focus: existing primitive button focus ring tokens (`--color-focus-ring`, `--color-focus-offset`)
 - Layering/shadow: `--z-overlay`, `--z-modal`, `--shadow-md`
 
+## Public Changelog Components (Phase 5B)
+
+Public routes (`/changelog`, `/changelog/:slug`) render from `src/changelog/public-routes.ts` with styles in `src/styles/public-changelog.css`.
+
+Feature component map:
+
+- `PublicChangelogList` (`.pc-feed-list`, `.pc-feed-item`):
+  - purpose: public feed cards with title, date, category badge, and text-only excerpt.
+  - tokens: `--color-surface-*`, `--color-border-*`, `--space-*`, `--font-size-*`, `--line-height-relaxed`.
+- `PublicCategoryBadge` (`.pc-category-badge`, `.pc-category-key--*`):
+  - purpose: neutral category affordance for `new`/`improvement`/`fix` that does not rely on color only.
+  - tokens: `--color-surface-*`, `--color-text-*`, `--color-border-*`, `--radius-*`, `--font-weight-*`.
+- `PublicChangelogDetail` (`.pc-detail`):
+  - purpose: server-rendered markdown body using the shared sanitized renderer.
+  - tokens: `--font-family-*`, `--font-size-*`, `--line-height-relaxed`, `--color-link-*`, `--color-focus-ring`, `--space-*`.
+- `PublicPagination` (`.pc-pagination`):
+  - purpose: simple page controls with server-capped page size.
+  - tokens: primitive button tokens via `ds-button` plus spacing tokens.
+
 ## What's New Publisher Draft Editor (Phase 3B)
 
 Internal draft authoring routes (`/admin/whats-new/new`, `/admin/whats-new/:id/edit`) use tokenized feature components rendered from `src/changelog/publisher-routes.ts` with styles in `src/styles/whats-new-admin.css`.

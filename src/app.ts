@@ -75,7 +75,7 @@ export function createApp(config: AppConfig, dependencies: AppDependencies = {})
   app.use("/api/admin/whats-new", createWhatsNewAdminRouter(config, changelogRepository, logger, rateLimitStore));
   app.use("/admin/whats-new", createWhatsNewPublisherRouter(config, changelogRepository, logger));
   app.use("/whats-new", createWhatsNewRouter(config, changelogRepository, logger));
-  app.use("/changelog", createPublicChangelogRouter(config, logger));
+  app.use("/changelog", createPublicChangelogRouter(config, changelogRepository, logger));
 
   app.use((_req, res) => {
     res.status(404).json({ error: "Not found" });
