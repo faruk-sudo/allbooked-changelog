@@ -6,6 +6,7 @@ import { createWhatsNewApiRouter } from "./changelog/api-routes";
 import { InMemoryChangelogRepository, type ChangelogRepository } from "./changelog/repository";
 import { createWhatsNewRouter } from "./changelog/routes";
 import { createPublicChangelogRouter } from "./changelog/public-routes";
+import { createPublicRssRouter } from "./changelog/rss-routes";
 import { appLogger, type Logger } from "./security/logger";
 import { InMemoryRateLimitStore, type RateLimitStore } from "./security/rate-limit";
 
@@ -76,6 +77,7 @@ export function createApp(config: AppConfig, dependencies: AppDependencies = {})
   app.use("/admin/whats-new", createWhatsNewPublisherRouter(config, changelogRepository, logger));
   app.use("/whats-new", createWhatsNewRouter(config, changelogRepository, logger));
   app.use("/changelog", createPublicChangelogRouter(config, changelogRepository, logger));
+  app.use("/rss", createPublicRssRouter(config, changelogRepository, logger));
 
   app.use((_req, res) => {
     res.status(404).json({ error: "Not found" });

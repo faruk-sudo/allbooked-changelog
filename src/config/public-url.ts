@@ -57,6 +57,11 @@ export function buildPublicAbsoluteUrl(publicSiteUrl: string | undefined, path: 
     return undefined;
   }
 
+  const normalizedBase = trimTrailingSlash(publicSiteUrl);
+  if (!normalizedBase) {
+    return undefined;
+  }
+
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;
-  return `${publicSiteUrl}${normalizedPath}`;
+  return `${normalizedBase}${normalizedPath}`;
 }

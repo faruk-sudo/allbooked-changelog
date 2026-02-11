@@ -34,6 +34,7 @@ npm run dev
 - What's New detail: `http://localhost:3000/whats-new/:slug`
 - Public changelog list (disabled by default): `http://localhost:3000/changelog`
 - Public changelog detail: `http://localhost:3000/changelog/:slug`
+- Public changelog RSS feed (disabled by default): `http://localhost:3000/rss`
 
 ## Required request headers (stub auth/tenant context)
 The current implementation uses headers as an auth/tenant stub until real SSO is integrated.
@@ -69,7 +70,7 @@ curl -i http://localhost:3000/whats-new \
 - `PUBLIC_CHANGELOG_ENABLED`: `true|false`; enables public `/changelog` surface (default `false`, returns `404` when disabled)
 - `PUBLIC_CHANGELOG_NOINDEX`: `true|false`; when enabled, public HTML responses include `X-Robots-Tag: noindex, nofollow` (default `true`)
 - `PUBLIC_SURFACE_CSP_ENABLED`: `true|false`; applies strict HTML CSP profile to public HTML surfaces (default `true`)
-- `PUBLIC_SITE_URL`: canonical base URL for absolute public links/canonical tags (`PUBLIC_SITE_URL` preferred; falls back to `BASE_URL`)
+- `PUBLIC_SITE_URL`: canonical base URL for absolute public links/canonical tags/RSS item links (`PUBLIC_SITE_URL` preferred; falls back to `BASE_URL`; required for `/rss`)
 - `BASE_URL`: backward-compatible fallback when `PUBLIC_SITE_URL` is unset
 - `RATE_LIMIT_ENABLED`: `true|false`; enables API rate limiting (default `true`)
 - `RATE_LIMIT_READ_PER_MIN`: per-minute limit for read endpoints and `/api/whats-new/seen` (default `120`)
@@ -103,8 +104,9 @@ curl -i http://localhost:3000/whats-new \
 - Non-allowlisted tenants receive `404`
 - Publisher allowlist gate enforced on admin CRUD endpoints
 - Security headers + strict CSP on HTML routes under `/whats-new*` and `/admin/whats-new*`
-- Public changelog remains hidden by default (`/changelog` returns `404` unless explicitly enabled)
+- Public changelog remains hidden by default (`/changelog` and `/rss` return `404` unless explicitly enabled)
 - Public changelog HTML responses use shared-cache-friendly headers (`Cache-Control: public, max-age=60, s-maxage=300, stale-while-revalidate=600`)
+- Public RSS responses use `application/rss+xml; charset=utf-8` and the same shared-cache header policy
 - Markdown rendering blocks raw HTML and sanitizes output
 - Logging is structured and safe by default (redacts body fields, auth/cookie headers, and secret-like values)
 - CSRF token required on mutating admin endpoints
@@ -138,7 +140,7 @@ curl -i http://localhost:3000/whats-new \
   - Production enforces `Content-Security-Policy` by default.
   - Non-production defaults to `Content-Security-Policy-Report-Only` to reduce local tooling breakage risk.
   - `WHATS_NEW_CSP_REPORT_ONLY` can override either mode for staged rollout.
-  - `PUBLIC_SURFACE_CSP_ENABLED` controls whether the same strict HTML CSP is attached to public HTML routes (`/changelog*`; future `/rss` can omit CSP because it is XML).
+  - `PUBLIC_SURFACE_CSP_ENABLED` controls whether the same strict HTML CSP is attached to public HTML routes (`/changelog*`). `/rss` is XML and intentionally omits HTML CSP.
 - Safe extension guidance:
   - Prefer explicit origins over wildcards (for example, `https://api.example.com` instead of `https:` or `*` for `connect-src`).
   - Keep `frame-ancestors` strict (`'none'` or minimal trusted origins).
@@ -224,16 +226,22 @@ Admin API (admin + allowlisted tenant + publisher allowlist + CSRF token for mut
 - Public HTML changelog pages (`/changelog`, `/changelog/:slug`) return:
   - `Cache-Control: public, max-age=60, s-maxage=300, stale-while-revalidate=600`
   - optional `X-Robots-Tag: noindex, nofollow` when `PUBLIC_CHANGELOG_NOINDEX=true`
+- Public RSS feed (`/rss`) returns:
+  - `Content-Type: application/rss+xml; charset=utf-8`
+  - `Cache-Control: public, max-age=60, s-maxage=300, stale-while-revalidate=600`
+  - absolute links using `PUBLIC_SITE_URL` (or `BASE_URL` fallback)
 - Production note: current limiter store is in-memory and therefore per app instance. Multi-instance deployments should use a shared store (for example Redis) to keep limits globally consistent.
 
-## Public surface rollout (Phase 5B)
+## Public surface rollout (Phase 5B + 5C)
 - Default-safe rollout posture:
   - `PUBLIC_CHANGELOG_ENABLED=false`
   - `PUBLIC_CHANGELOG_NOINDEX=true`
 - Public route implementation:
   - list page: `GET /changelog`
   - detail page: `GET /changelog/:slug`
+  - RSS feed: `GET /rss`
   - implementation: `src/changelog/public-routes.ts`
+  - RSS implementation: `src/changelog/rss-routes.ts` + `src/changelog/rss.ts`
   - data access: `listPublicPosts` and `findPublicPostBySlug` in `src/changelog/repository.ts`
 - Public policy boundary:
   - `status='published'`
@@ -244,6 +252,12 @@ Admin API (admin + allowlisted tenant + publisher allowlist + CSRF token for mut
   - query params: `page` and `limit`
   - server cap: `limit <= 50`
   - ordering: `published_at DESC, id DESC`
+- RSS behavior:
+  - query param: optional `limit`
+  - default: `20`
+  - server cap: `limit <= 50`
+  - ordering: `published_at DESC, id DESC`
+  - RSS description is sanitized HTML excerpt wrapped in CDATA
 - Caching rationale:
   - public pages are cacheable at CDN/shared layers
   - short `max-age` + `s-maxage` + `stale-while-revalidate` reduces origin load while keeping updates fresh
@@ -252,7 +266,8 @@ Admin API (admin + allowlisted tenant + publisher allowlist + CSRF token for mut
   2. Keep `PUBLIC_CHANGELOG_NOINDEX=true`
   3. Verify headers with `curl -I http://localhost:3000/changelog`
   4. Verify detail headers with `curl -I http://localhost:3000/changelog/<public-slug>`
-  5. Disable noindex only when public launch is ready (`PUBLIC_CHANGELOG_NOINDEX=false`)
+  5. Verify RSS with `curl -i http://localhost:3000/rss`
+  6. Disable noindex only when public launch is ready (`PUBLIC_CHANGELOG_NOINDEX=false`)
 
 Audit log behavior:
 - All state-changing admin endpoints write to `changelog_audit_log`.
@@ -263,6 +278,7 @@ Audit log behavior:
 - `/whats-new` renders the list feed client-side from `GET /api/whats-new/posts`.
 - `/whats-new/:slug` resolves on the server, enforces published/authenticated + tenant scope, and renders markdown through the shared sanitization pipeline.
 - `/changelog` and `/changelog/:slug` resolve on the server, enforce published/public/global-only scope, and render markdown through the same sanitization pipeline used by What’s New.
+- `/rss` resolves on the server, enforces published/public/global-only scope, and emits RSS 2.0 XML with sanitized descriptions and absolute links.
 
 ## Tests
 Run unit tests:

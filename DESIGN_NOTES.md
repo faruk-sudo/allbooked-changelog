@@ -520,3 +520,33 @@ SELECT EXISTS (
    - hard cap: `limit <= 50`
    - ordering: `published_at DESC, id DESC`
 6. Added a dedicated token-based public stylesheet (`src/styles/public-changelog.css`) that follows the neutral design tokens and preserves accessible focus/link states.
+
+## Phase 5C (5.2) public RSS feed
+
+### Decisions
+
+1. Added a dedicated root RSS endpoint (`GET /rss`) via `src/changelog/rss-routes.ts` and mounted it in `src/app.ts`.
+   - Uses the same readiness gate as public HTML (`PUBLIC_CHANGELOG_ENABLED`).
+   - Returns safe `404` when disabled.
+2. Reused the same strict public boundary and repository read path:
+   - `status='published'`
+   - `visibility='public'`
+   - `tenant_id IS NULL` (global-only MVP)
+   - ordering remains `published_at DESC, id DESC`
+3. Implemented a standalone RSS generator module (`src/changelog/rss.ts`) for predictable XML output:
+   - RSS 2.0 with channel fields (`title`, `link`, `description`, `language`, `lastBuildDate`)
+   - item fields (`title`, `link`, `guid`, `pubDate`, `description`, `category`)
+   - absolute links built from canonical `PUBLIC_SITE_URL`/`BASE_URL` resolution
+4. Kept content safety fail-closed:
+   - RSS descriptions are generated through the existing `renderMarkdownSafe` sanitizer pipeline
+   - suspicious excerpt payloads fall back to a static safe description
+   - description payload is wrapped in CDATA after sanitization
+5. Applied public cache policy and RSS content-type explicitly:
+   - `Content-Type: application/rss+xml; charset=utf-8`
+   - `Cache-Control: public, max-age=60, s-maxage=300, stale-while-revalidate=600`
+6. Added route-level tests for:
+   - gating behavior (`404` when disabled)
+   - headers + XML shape
+   - strict leakage prevention (private/draft/tenant-scoped posts excluded)
+   - limit cap (`max 50`)
+   - sanitization regressions (`<script`, `onerror=`, `javascript:` absent)

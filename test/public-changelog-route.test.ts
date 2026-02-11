@@ -266,4 +266,164 @@ describe("public changelog routes", () => {
     expect(response.text).not.toMatch(/<[^>]+\son(?:error|load)\s*=/i);
     expect(response.text).not.toMatch(/href\s*=\s*"\s*javascript:/i);
   });
+
+  it("returns 404 for /rss when PUBLIC_CHANGELOG_ENABLED is false", async () => {
+    const app = createApp(createConfig(), { changelogRepository: new InMemoryChangelogRepository([buildPublicPost()]) });
+
+    const response = await request(app).get("/rss");
+
+    expect(response.status).toBe(404);
+  });
+
+  it("serves RSS XML with public cache headers and absolute URLs when enabled", async () => {
+    const app = createApp(
+      createConfig({
+        publicSiteUrl: "https://updates.example.com/",
+        publicSurface: {
+          enabled: true,
+          noindex: true,
+          cspEnabled: true
+        }
+      }),
+      { changelogRepository: new InMemoryChangelogRepository([buildPublicPost()]) }
+    );
+
+    const response = await request(app).get("/rss");
+
+    expect(response.status).toBe(200);
+    expect(response.headers["content-type"]).toBe("application/rss+xml; charset=utf-8");
+    expect(response.headers["cache-control"]).toBe("public, max-age=60, s-maxage=300, stale-while-revalidate=600");
+    expect(response.text).toContain('<rss version="2.0">');
+    expect(response.text).toContain("<channel>");
+    expect(response.text).toContain("<item>");
+    expect(response.text).toContain("<link>https://updates.example.com/changelog</link>");
+    expect(response.text).toContain(
+      "<guid isPermaLink=\"true\">https://updates.example.com/changelog/public-launch</guid>"
+    );
+    expect(response.text).not.toContain("https://updates.example.com//changelog");
+  });
+
+  it("returns 500 for /rss when enabled but PUBLIC_SITE_URL/BASE_URL is not configured", async () => {
+    const app = createApp(
+      createConfig({
+        publicSurface: {
+          enabled: true,
+          noindex: true,
+          cspEnabled: true
+        }
+      }),
+      { changelogRepository: new InMemoryChangelogRepository([buildPublicPost()]) }
+    );
+
+    const response = await request(app).get("/rss");
+
+    expect(response.status).toBe(500);
+    expect(response.body).toEqual({ error: "Internal server error" });
+  });
+
+  it("shows only published + public + global posts in RSS output", async () => {
+    const app = createApp(
+      createConfig({
+        publicSiteUrl: "https://updates.example.com",
+        publicSurface: {
+          enabled: true,
+          noindex: true,
+          cspEnabled: true
+        }
+      }),
+      {
+        changelogRepository: new InMemoryChangelogRepository([
+          buildPublicPost({ title: "RSS Public launch", slug: "rss-public-launch" }),
+          buildPublicPost({
+            title: "RSS Authenticated only",
+            slug: "rss-authenticated-only",
+            visibility: "authenticated",
+            id: "00000000-0000-4000-8000-000000000002"
+          }),
+          buildPublicPost({
+            title: "RSS Draft public",
+            slug: "rss-draft-public",
+            status: "draft",
+            publishedAt: null,
+            id: "00000000-0000-4000-8000-000000000003"
+          }),
+          buildPublicPost({
+            title: "RSS Tenant public",
+            slug: "rss-tenant-public",
+            tenantId: "tenant-alpha",
+            id: "00000000-0000-4000-8000-000000000004"
+          })
+        ])
+      }
+    );
+
+    const response = await request(app).get("/rss");
+
+    expect(response.status).toBe(200);
+    expect(response.text).toContain("RSS Public launch");
+    expect(response.text).not.toContain("RSS Authenticated only");
+    expect(response.text).not.toContain("RSS Draft public");
+    expect(response.text).not.toContain("RSS Tenant public");
+  });
+
+  it("caps RSS limit at 50 items", async () => {
+    const posts = Array.from({ length: 55 }).map((_, index) =>
+      buildPublicPost({
+        id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+        title: `RSS post ${index + 1}`,
+        slug: `rss-post-${index + 1}`,
+        publishedAt: new Date(Date.UTC(2026, 1, 1, 0, 0, 55 - index)).toISOString()
+      })
+    );
+
+    const app = createApp(
+      createConfig({
+        publicSiteUrl: "https://updates.example.com",
+        publicSurface: {
+          enabled: true,
+          noindex: true,
+          cspEnabled: true
+        }
+      }),
+      { changelogRepository: new InMemoryChangelogRepository(posts) }
+    );
+
+    const response = await request(app).get("/rss?limit=999");
+    const itemCount = (response.text.match(/<item>/g) || []).length;
+
+    expect(response.status).toBe(200);
+    expect(itemCount).toBe(50);
+    expect(response.text).toContain("RSS post 1");
+    expect(response.text).not.toContain("RSS post 51");
+  });
+
+  it("keeps RSS descriptions sanitized for XSS payloads", async () => {
+    const app = createApp(
+      createConfig({
+        publicSiteUrl: "https://updates.example.com",
+        publicSurface: {
+          enabled: true,
+          noindex: true,
+          cspEnabled: true
+        }
+      }),
+      {
+        changelogRepository: new InMemoryChangelogRepository([
+          buildPublicPost({
+            slug: "rss-sanitized-public",
+            bodyMarkdown:
+              "<script>alert(1)</script>\n<img src=x onerror=alert(1)>\n[bad](javascript:alert(2))\n[ok](https://example.com)\n**safe**"
+          })
+        ])
+      }
+    );
+
+    const response = await request(app).get("/rss");
+
+    expect(response.status).toBe(200);
+    expect(response.text).not.toContain("<script");
+    expect(response.text).not.toContain("onerror=");
+    expect(response.text).not.toContain("javascript:");
+    expect(response.text).toContain("<description><![CDATA[");
+  });
 });
