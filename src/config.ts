@@ -1,4 +1,5 @@
 import type { UserRole } from "./types/context";
+import { resolvePublicSiteUrl } from "./config/public-url";
 
 export interface SecurityHeadersConfig {
   isProduction: boolean;
@@ -14,6 +15,12 @@ export interface RateLimitConfig {
   writePerMinute: number;
 }
 
+export interface PublicSurfaceConfig {
+  enabled: boolean;
+  noindex: boolean;
+  cspEnabled: boolean;
+}
+
 export interface AppConfig {
   port: number;
   whatsNewKillSwitch: boolean;
@@ -26,6 +33,8 @@ export interface AppConfig {
   devAuthBypassUserRole: UserRole;
   devAuthBypassTenantId: string;
   devAuthBypassUserEmail?: string;
+  publicSiteUrl?: string;
+  publicSurface?: Partial<PublicSurfaceConfig>;
   rateLimit?: Partial<RateLimitConfig>;
   securityHeaders?: Partial<SecurityHeadersConfig>;
 }
@@ -151,6 +160,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const rateLimitEnabled = parseBoolean(env.RATE_LIMIT_ENABLED, true);
   const rateLimitReadPerMinute = parsePositiveInteger(env.RATE_LIMIT_READ_PER_MIN, 120);
   const rateLimitWritePerMinute = parsePositiveInteger(env.RATE_LIMIT_WRITE_PER_MIN, 30);
+  const publicChangelogEnabled = parseBoolean(env.PUBLIC_CHANGELOG_ENABLED, false);
+  const publicChangelogNoindex = parseBoolean(env.PUBLIC_CHANGELOG_NOINDEX, true);
+  const publicSurfaceCspEnabled = parseBoolean(env.PUBLIC_SURFACE_CSP_ENABLED, true);
+  const publicSiteUrl = resolvePublicSiteUrl(env);
 
   // Local browser fallback must still satisfy allowlist middleware.
   if (devAuthBypassEnabled && allowlistEnabled) {
@@ -177,6 +190,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     devAuthBypassUserRole,
     devAuthBypassTenantId,
     devAuthBypassUserEmail,
+    publicSiteUrl,
+    publicSurface: {
+      enabled: publicChangelogEnabled,
+      noindex: publicChangelogNoindex,
+      cspEnabled: publicSurfaceCspEnabled
+    },
     rateLimit: {
       enabled: rateLimitEnabled,
       readPerMinute: rateLimitReadPerMinute,

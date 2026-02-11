@@ -32,6 +32,7 @@ npm run dev
 - Health: `http://localhost:3000/healthz`
 - What's New: `http://localhost:3000/whats-new`
 - What's New detail: `http://localhost:3000/whats-new/:slug`
+- Public changelog placeholder (disabled by default): `http://localhost:3000/changelog`
 
 ## Required request headers (stub auth/tenant context)
 The current implementation uses headers as an auth/tenant stub until real SSO is integrated.
@@ -64,6 +65,11 @@ curl -i http://localhost:3000/whats-new \
 - `WHATS_NEW_DEV_USER_ROLE`: fallback role (`ADMIN` or `USER`) when dev auth bypass is enabled
 - `WHATS_NEW_DEV_TENANT_ID`: fallback tenant ID when dev auth bypass is enabled
 - `WHATS_NEW_DEV_USER_EMAIL`: optional fallback email when dev auth bypass is enabled
+- `PUBLIC_CHANGELOG_ENABLED`: `true|false`; enables public `/changelog` surface (default `false`, returns `404` when disabled)
+- `PUBLIC_CHANGELOG_NOINDEX`: `true|false`; when enabled, public HTML responses include `X-Robots-Tag: noindex, nofollow` (default `true`)
+- `PUBLIC_SURFACE_CSP_ENABLED`: `true|false`; applies strict HTML CSP profile to public HTML surfaces (default `true`)
+- `PUBLIC_SITE_URL`: canonical base URL for absolute public links/canonical tags (`PUBLIC_SITE_URL` preferred; falls back to `BASE_URL`)
+- `BASE_URL`: backward-compatible fallback when `PUBLIC_SITE_URL` is unset
 - `RATE_LIMIT_ENABLED`: `true|false`; enables API rate limiting (default `true`)
 - `RATE_LIMIT_READ_PER_MIN`: per-minute limit for read endpoints and `/api/whats-new/seen` (default `120`)
 - `RATE_LIMIT_WRITE_PER_MIN`: per-minute limit for publisher mutating admin endpoints (default `30`)
@@ -75,6 +81,11 @@ curl -i http://localhost:3000/whats-new \
 - `DATABASE_SSL`: `true|false` (default `false`) for DB TLS
 - `DATABASE_SSL_REJECT_UNAUTHORIZED`: `true|false` (default `true`) when TLS is enabled
 - Dev convenience behavior: when `WHATS_NEW_DEV_AUTH_BYPASS=true` and dev role is `ADMIN`, the dev bypass user is auto-added to publisher allowlist at runtime (non-production only).
+- `PUBLIC_SITE_URL`/`BASE_URL` validation:
+  - must be an absolute `http(s)` URL
+  - production requires `https`
+  - non-production allows `http://localhost`/loopback for local testing
+  - trailing slash is trimmed (for example `https://updates.example.com/` -> `https://updates.example.com`)
 
 ## Publisher allowlist configuration (MVP)
 - Primary control: `WHATS_NEW_PUBLISHER_ALLOWLIST_USER_IDS`.
@@ -91,6 +102,8 @@ curl -i http://localhost:3000/whats-new \
 - Non-allowlisted tenants receive `404`
 - Publisher allowlist gate enforced on admin CRUD endpoints
 - Security headers + strict CSP on HTML routes under `/whats-new*` and `/admin/whats-new*`
+- Public changelog remains hidden by default (`/changelog` returns `404` unless explicitly enabled)
+- Public placeholder responses use shared-cache-friendly headers (`Cache-Control: public, max-age=60, s-maxage=300, stale-while-revalidate=600`)
 - Markdown rendering blocks raw HTML and sanitizes output
 - Logging is structured and safe by default (redacts body fields, auth/cookie headers, and secret-like values)
 - CSRF token required on mutating admin endpoints
@@ -98,7 +111,7 @@ curl -i http://localhost:3000/whats-new \
 - Read API cache headers are private by default (`Cache-Control: private, max-age=30, stale-while-revalidate=60`)
 
 ## Security headers and CSP
-- Applied on HTML responses for What’s New reader/publisher surfaces (`/whats-new*`, `/admin/whats-new*`).
+- Applied on HTML responses for What’s New reader/publisher surfaces (`/whats-new*`, `/admin/whats-new*`) and optional public HTML surfaces (`/changelog*` when enabled).
 - Baseline headers:
   - `X-Content-Type-Options: nosniff`
   - `Referrer-Policy: strict-origin-when-cross-origin`
@@ -124,6 +137,7 @@ curl -i http://localhost:3000/whats-new \
   - Production enforces `Content-Security-Policy` by default.
   - Non-production defaults to `Content-Security-Policy-Report-Only` to reduce local tooling breakage risk.
   - `WHATS_NEW_CSP_REPORT_ONLY` can override either mode for staged rollout.
+  - `PUBLIC_SURFACE_CSP_ENABLED` controls whether the same strict HTML CSP is attached to public HTML routes (`/changelog*`; future `/rss` can omit CSP because it is XML).
 - Safe extension guidance:
   - Prefer explicit origins over wildcards (for example, `https://api.example.com` instead of `https:` or `*` for `connect-src`).
   - Keep `frame-ancestors` strict (`'none'` or minimal trusted origins).
@@ -206,7 +220,24 @@ Admin API (admin + allowlisted tenant + publisher allowlist + CSRF token for mut
   - `Cache-Control: private, max-age=30, stale-while-revalidate=60`
   - `Vary: Authorization, x-user-id, x-tenant-id`
   - weak `ETag`; matching `If-None-Match` requests return `304`.
+- Public HTML changelog placeholder (`/changelog`) returns:
+  - `Cache-Control: public, max-age=60, s-maxage=300, stale-while-revalidate=600`
+  - optional `X-Robots-Tag: noindex, nofollow` when `PUBLIC_CHANGELOG_NOINDEX=true`
 - Production note: current limiter store is in-memory and therefore per app instance. Multi-instance deployments should use a shared store (for example Redis) to keep limits globally consistent.
+
+## Public surface readiness (Phase 5A bridge)
+- Default-safe rollout posture:
+  - `PUBLIC_CHANGELOG_ENABLED=false`
+  - `PUBLIC_CHANGELOG_NOINDEX=true`
+- Public policy boundary for future `/changelog` and `/rss` content:
+  - `status='published'`
+  - `visibility='public'`
+  - `tenant_id IS NULL` (global-only MVP public scope)
+- Public routes reject `status`/`visibility`/`tenant_id` query overrides to avoid policy bypass from request parameters.
+- Recommended staging rollout:
+  1. Enable `PUBLIC_CHANGELOG_ENABLED=true`
+  2. Keep `PUBLIC_CHANGELOG_NOINDEX=true`
+  3. Verify headers with `curl -I http://localhost:3000/changelog`
 
 Audit log behavior:
 - All state-changing admin endpoints write to `changelog_audit_log`.

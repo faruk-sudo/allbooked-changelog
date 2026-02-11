@@ -467,3 +467,29 @@ SELECT EXISTS (
 4. Validation-first posture:
    - executed local backup/restore drill on February 11, 2026
    - validated restore with migration idempotency check, smoke-check, table count checks, and live read endpoint probes
+
+## Phase 5A (5.0) public-surface readiness toggle
+
+### Decisions
+
+1. Added a canonical public URL resolver (`src/config/public-url.ts`) to standardize absolute URL generation:
+   - prefers `PUBLIC_SITE_URL`, falls back to `BASE_URL`
+   - trims trailing slashes and strips query/hash
+   - production requires `https`
+   - non-production allows loopback `http://localhost` / `127.0.0.1` / `::1`
+2. Introduced explicit public-surface toggles in config with safe defaults:
+   - `PUBLIC_CHANGELOG_ENABLED=false`
+   - `PUBLIC_CHANGELOG_NOINDEX=true`
+   - `PUBLIC_SURFACE_CSP_ENABLED=true`
+3. Added a reusable public policy module (`src/changelog/public-surface.ts`) that sets an immutable boundary for future public routes:
+   - `status='published'`
+   - `visibility='public'`
+   - `tenant_id IS NULL` (global-only MVP public scope)
+   - request query overrides for `status`, `visibility`, and `tenant_id` are rejected
+4. Added shared public response header helpers for future `/changelog` and `/rss`:
+   - `Cache-Control: public, max-age=60, s-maxage=300, stale-while-revalidate=600`
+   - optional `X-Robots-Tag: noindex, nofollow` when noindex toggle is enabled
+5. Added a minimal `/changelog` placeholder route (`src/changelog/public-routes.ts`) behind the readiness toggle:
+   - returns `404` when disabled to avoid feature discovery
+   - returns simple HTML placeholder when enabled with no public content exposure
+   - applies same strict HTML CSP as existing What’s New surfaces when `PUBLIC_SURFACE_CSP_ENABLED=true`

@@ -89,4 +89,54 @@ describe("loadConfig", () => {
     expect(config.rateLimit?.readPerMinute).toBe(250);
     expect(config.rateLimit?.writePerMinute).toBe(40);
   });
+
+  it("defaults public changelog readiness toggles to safe values", () => {
+    const config = loadConfig({});
+
+    expect(config.publicSurface?.enabled).toBe(false);
+    expect(config.publicSurface?.noindex).toBe(true);
+    expect(config.publicSurface?.cspEnabled).toBe(true);
+  });
+
+  it("prefers PUBLIC_SITE_URL over BASE_URL and trims trailing slashes", () => {
+    const config = loadConfig({
+      NODE_ENV: "production",
+      PUBLIC_SITE_URL: "https://updates.example.com/path///",
+      BASE_URL: "https://fallback.example.com"
+    });
+
+    expect(config.publicSiteUrl).toBe("https://updates.example.com/path");
+  });
+
+  it("rejects invalid public URL config in production", () => {
+    expect(() =>
+      loadConfig({
+        NODE_ENV: "production",
+        PUBLIC_SITE_URL: "not a valid url"
+      })
+    ).toThrowError("PUBLIC_SITE_URL/BASE_URL must be a valid absolute URL");
+  });
+
+  it("rejects non-https public URL config in production", () => {
+    expect(() =>
+      loadConfig({
+        NODE_ENV: "production",
+        PUBLIC_SITE_URL: "http://updates.example.com"
+      })
+    ).toThrowError("PUBLIC_SITE_URL/BASE_URL must use https in production");
+  });
+
+  it("accepts localhost http public URL in dev/test", () => {
+    const devConfig = loadConfig({
+      NODE_ENV: "development",
+      PUBLIC_SITE_URL: "http://localhost:3000/"
+    });
+    const testConfig = loadConfig({
+      NODE_ENV: "test",
+      BASE_URL: "http://127.0.0.1:3000/changelog/"
+    });
+
+    expect(devConfig.publicSiteUrl).toBe("http://localhost:3000");
+    expect(testConfig.publicSiteUrl).toBe("http://127.0.0.1:3000/changelog");
+  });
 });
