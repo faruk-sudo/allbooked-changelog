@@ -18,6 +18,11 @@ function createConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     devAuthBypassUserId: "dev-admin-1",
     devAuthBypassUserRole: "ADMIN",
     devAuthBypassTenantId: "tenant-alpha",
+    rateLimit: {
+      enabled: true,
+      readPerMinute: 120,
+      writePerMinute: 30
+    },
     ...overrides
   };
 }
@@ -225,6 +230,87 @@ describe("What's New read API", () => {
 
     expect(response.status).toBe(200);
     expect(response.body.has_unread).toBe(true);
+  });
+
+  it("sets private cache headers on feed endpoint", async () => {
+    const repo = new InMemoryChangelogRepository([
+      {
+        id: "1",
+        tenantId: null,
+        visibility: "authenticated",
+        status: "published",
+        category: "new",
+        title: "Global update",
+        slug: "global-update",
+        bodyMarkdown: "Body",
+        publishedAt: "2026-02-01T00:00:00.000Z",
+        revision: 1
+      }
+    ]);
+
+    const app = createApp(createConfig(), { changelogRepository: repo });
+    const response = await withAdminHeaders(request(app).get("/api/whats-new/posts"));
+
+    expect(response.status).toBe(200);
+    expect(response.headers["cache-control"]).toBe("private, max-age=30, stale-while-revalidate=60");
+    expect(response.headers["vary"]).toContain("Authorization");
+    expect(response.headers["etag"]).toBeTypeOf("string");
+  });
+
+  it("returns 304 on feed endpoint when If-None-Match matches ETag", async () => {
+    const repo = new InMemoryChangelogRepository([
+      {
+        id: "1",
+        tenantId: null,
+        visibility: "authenticated",
+        status: "published",
+        category: "new",
+        title: "Global update",
+        slug: "global-update",
+        bodyMarkdown: "Body",
+        publishedAt: "2026-02-01T00:00:00.000Z",
+        revision: 1
+      }
+    ]);
+
+    const app = createApp(createConfig(), { changelogRepository: repo });
+    const firstResponse = await withAdminHeaders(request(app).get("/api/whats-new/posts"));
+    const etag = firstResponse.headers["etag"];
+
+    expect(firstResponse.status).toBe(200);
+    expect(etag).toBeTypeOf("string");
+
+    const secondResponse = await withAdminHeaders(request(app).get("/api/whats-new/posts").set("if-none-match", etag));
+    expect(secondResponse.status).toBe(304);
+  });
+
+  it("sets private cache headers on detail and unread endpoints", async () => {
+    const repo = new InMemoryChangelogRepository([
+      {
+        id: "1",
+        tenantId: null,
+        visibility: "authenticated",
+        status: "published",
+        category: "new",
+        title: "Global update",
+        slug: "global-update",
+        bodyMarkdown: "Body",
+        publishedAt: "2026-02-01T00:00:00.000Z",
+        revision: 1
+      }
+    ]);
+
+    const app = createApp(createConfig(), { changelogRepository: repo });
+    const detailResponse = await withAdminHeaders(request(app).get("/api/whats-new/posts/global-update"));
+    const unreadResponse = await withAdminHeaders(request(app).get("/api/whats-new/unread"));
+
+    expect(detailResponse.status).toBe(200);
+    expect(detailResponse.headers["cache-control"]).toBe("private, max-age=30, stale-while-revalidate=60");
+    expect(detailResponse.headers["etag"]).toBeTypeOf("string");
+
+    expect(unreadResponse.status).toBe(200);
+    expect(unreadResponse.headers["cache-control"]).toBe("private, max-age=30, stale-while-revalidate=60");
+    expect(unreadResponse.headers["etag"]).toBeTypeOf("string");
   });
 
   it("returns unread=false when read_state is newer than the latest publication", async () => {
@@ -472,6 +558,30 @@ describe("What's New read API", () => {
     const response = await withAdminHeaders(request(app).post("/api/whats-new/seen"));
 
     expect(response.status).toBe(403);
+  });
+
+  it("rate limits read endpoints and returns 429 with retry-after", async () => {
+    const app = createApp(
+      createConfig({
+        rateLimit: {
+          enabled: true,
+          readPerMinute: 2,
+          writePerMinute: 30
+        }
+      }),
+      { changelogRepository: new InMemoryChangelogRepository() }
+    );
+
+    const first = await withAdminHeaders(request(app).get("/api/whats-new/posts"));
+    const second = await withAdminHeaders(request(app).get("/api/whats-new/posts"));
+    const third = await withAdminHeaders(request(app).get("/api/whats-new/posts"));
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(third.status).toBe(429);
+    expect(third.body.error).toBe("Too many requests");
+    expect(third.headers["retry-after"]).toBeTypeOf("string");
+    expect(third.headers["ratelimit-limit"]).toBe("2");
   });
 });
 
@@ -864,5 +974,47 @@ describe("What's New admin API", () => {
       expect(JSON.stringify(entry.metadata ?? {})).not.toContain("\"bodyMarkdown\":");
       expect(JSON.stringify(entry.metadata ?? {})).not.toContain("\"markdown\":");
     }
+  });
+
+  it("rate limits publisher write endpoints and returns 429 with retry-after", async () => {
+    const app = createApp(
+      createConfig({
+        rateLimit: {
+          enabled: true,
+          readPerMinute: 120,
+          writePerMinute: 2
+        }
+      }),
+      { changelogRepository: new InMemoryChangelogRepository() }
+    );
+
+    const first = await withAdminHeaders(
+      request(app)
+        .post("/api/admin/whats-new/posts")
+        .set("x-csrf-token", csrfToken)
+        .send({ title: "First", slug: "first-post", category: "new", body_markdown: "Body" }),
+      { userId: "publisher-1" }
+    );
+    const second = await withAdminHeaders(
+      request(app)
+        .post("/api/admin/whats-new/posts")
+        .set("x-csrf-token", csrfToken)
+        .send({ title: "Second", slug: "second-post", category: "new", body_markdown: "Body" }),
+      { userId: "publisher-1" }
+    );
+    const third = await withAdminHeaders(
+      request(app)
+        .post("/api/admin/whats-new/posts")
+        .set("x-csrf-token", csrfToken)
+        .send({ title: "Third", slug: "third-post", category: "new", body_markdown: "Body" }),
+      { userId: "publisher-1" }
+    );
+
+    expect(first.status).toBe(201);
+    expect(second.status).toBe(201);
+    expect(third.status).toBe(429);
+    expect(third.body.error).toBe("Too many requests");
+    expect(third.headers["retry-after"]).toBeTypeOf("string");
+    expect(third.headers["ratelimit-limit"]).toBe("2");
   });
 });

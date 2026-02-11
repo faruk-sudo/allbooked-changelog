@@ -77,4 +77,16 @@ describe("loadConfig", () => {
     expect(config.securityHeaders?.cspConnectSrc).toEqual(["'self'", "https://api.example.com"]);
     expect(config.securityHeaders?.cspImgSrc).toEqual(["'self'", "data:", "https:"]);
   });
+
+  it("parses rate limit overrides from env", () => {
+    const config = loadConfig({
+      RATE_LIMIT_ENABLED: "false",
+      RATE_LIMIT_READ_PER_MIN: "250",
+      RATE_LIMIT_WRITE_PER_MIN: "40"
+    });
+
+    expect(config.rateLimit?.enabled).toBe(false);
+    expect(config.rateLimit?.readPerMinute).toBe(250);
+    expect(config.rateLimit?.writePerMinute).toBe(40);
+  });
 });

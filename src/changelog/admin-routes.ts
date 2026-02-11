@@ -1,6 +1,12 @@
 import { Router, type Request, type Response } from "express";
 import type { AppConfig } from "../config";
 import { appLogger, type Logger } from "../security/logger";
+import {
+  createRateLimitMiddleware,
+  InMemoryRateLimitStore,
+  resolveRateLimitConfig,
+  type RateLimitStore
+} from "../security/rate-limit";
 import { renderMarkdownSafe } from "../security/markdown";
 import { getGuardedWhatsNewContext } from "./authz";
 import { applyWhatsNewAdminGuards } from "./guards";
@@ -154,10 +160,18 @@ function handleAdminError(
 export function createWhatsNewAdminRouter(
   config: AppConfig,
   repository: ChangelogRepository,
-  logger: Logger = appLogger
+  logger: Logger = appLogger,
+  rateLimitStore: RateLimitStore = new InMemoryRateLimitStore()
 ): Router {
   const router = Router();
   applyWhatsNewAdminGuards(router, config);
+  const rateLimitConfig = resolveRateLimitConfig(config);
+  const writeRateLimiter = createRateLimitMiddleware({
+    enabled: rateLimitConfig.enabled,
+    keyPrefix: "whats-new-write",
+    limit: rateLimitConfig.writePerMinute,
+    store: rateLimitStore
+  });
 
   router.get("/posts", async (req: Request, res: Response) => {
     let actorId: string | undefined;
@@ -210,7 +224,7 @@ export function createWhatsNewAdminRouter(
     }
   });
 
-  router.post("/posts", async (req: Request, res: Response) => {
+  router.post("/posts", writeRateLimiter, async (req: Request, res: Response) => {
     let actorId: string | undefined;
     let tenantId: string | undefined;
 
@@ -255,7 +269,7 @@ export function createWhatsNewAdminRouter(
     }
   });
 
-  router.put("/posts/:id", async (req: Request, res: Response) => {
+  router.put("/posts/:id", writeRateLimiter, async (req: Request, res: Response) => {
     let actorId: string | undefined;
     let tenantId: string | undefined;
     const idParam = req.params.id;
@@ -339,7 +353,7 @@ export function createWhatsNewAdminRouter(
     }
   });
 
-  router.post("/preview", async (req: Request, res: Response) => {
+  router.post("/preview", writeRateLimiter, async (req: Request, res: Response) => {
     let actorId: string | undefined;
     let tenantId: string | undefined;
 
@@ -364,7 +378,7 @@ export function createWhatsNewAdminRouter(
     }
   });
 
-  router.post("/posts/:id/publish", async (req: Request, res: Response) => {
+  router.post("/posts/:id/publish", writeRateLimiter, async (req: Request, res: Response) => {
     let actorId: string | undefined;
     let tenantId: string | undefined;
     const idParam = req.params.id;
@@ -403,7 +417,7 @@ export function createWhatsNewAdminRouter(
     }
   });
 
-  router.post("/posts/:id/unpublish", async (req: Request, res: Response) => {
+  router.post("/posts/:id/unpublish", writeRateLimiter, async (req: Request, res: Response) => {
     let actorId: string | undefined;
     let tenantId: string | undefined;
     const idParam = req.params.id;

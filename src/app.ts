@@ -6,10 +6,12 @@ import { createWhatsNewApiRouter } from "./changelog/api-routes";
 import { InMemoryChangelogRepository, type ChangelogRepository } from "./changelog/repository";
 import { createWhatsNewRouter } from "./changelog/routes";
 import { appLogger, type Logger } from "./security/logger";
+import { InMemoryRateLimitStore, type RateLimitStore } from "./security/rate-limit";
 
 export interface AppDependencies {
   logger?: Logger;
   changelogRepository?: ChangelogRepository;
+  rateLimitStore?: RateLimitStore;
 }
 
 function createFallbackRepository(): ChangelogRepository {
@@ -46,6 +48,7 @@ export function createApp(config: AppConfig, dependencies: AppDependencies = {})
   const app = express();
   const logger = dependencies.logger ?? appLogger;
   const changelogRepository = dependencies.changelogRepository ?? createFallbackRepository();
+  const rateLimitStore = dependencies.rateLimitStore ?? new InMemoryRateLimitStore();
 
   app.disable("x-powered-by");
   app.use(express.json({ limit: "128kb" }));
@@ -58,8 +61,8 @@ export function createApp(config: AppConfig, dependencies: AppDependencies = {})
     res.redirect(302, "/whats-new");
   });
 
-  app.use("/api/whats-new", createWhatsNewApiRouter(config, changelogRepository, logger));
-  app.use("/api/admin/whats-new", createWhatsNewAdminRouter(config, changelogRepository, logger));
+  app.use("/api/whats-new", createWhatsNewApiRouter(config, changelogRepository, logger, rateLimitStore));
+  app.use("/api/admin/whats-new", createWhatsNewAdminRouter(config, changelogRepository, logger, rateLimitStore));
   app.use("/admin/whats-new", createWhatsNewPublisherRouter(config, changelogRepository, logger));
   app.use("/whats-new", createWhatsNewRouter(config, changelogRepository, logger));
 

@@ -64,6 +64,9 @@ curl -i http://localhost:3000/whats-new \
 - `WHATS_NEW_DEV_USER_ROLE`: fallback role (`ADMIN` or `USER`) when dev auth bypass is enabled
 - `WHATS_NEW_DEV_TENANT_ID`: fallback tenant ID when dev auth bypass is enabled
 - `WHATS_NEW_DEV_USER_EMAIL`: optional fallback email when dev auth bypass is enabled
+- `RATE_LIMIT_ENABLED`: `true|false`; enables API rate limiting (default `true`)
+- `RATE_LIMIT_READ_PER_MIN`: per-minute limit for read endpoints and `/api/whats-new/seen` (default `120`)
+- `RATE_LIMIT_WRITE_PER_MIN`: per-minute limit for publisher mutating admin endpoints (default `30`)
 - `WHATS_NEW_CSP_REPORT_ONLY`: `true|false`; toggles CSP report-only mode (`true` by default outside production)
 - `CSP_FRAME_ANCESTORS`: comma-separated frame ancestor sources (default `'none'`; example `'self',https://www.example.com`)
 - `CSP_CONNECT_SRC`: comma-separated `connect-src` sources (default `'self'`)
@@ -91,6 +94,8 @@ curl -i http://localhost:3000/whats-new \
 - Markdown rendering blocks raw HTML and sanitizes output
 - Logging is structured and safe by default (redacts body fields, auth/cookie headers, and secret-like values)
 - CSRF token required on mutating admin endpoints
+- API rate limiting on read and publisher mutating endpoints (generic `429` response with `Retry-After`)
+- Read API cache headers are private by default (`Cache-Control: private, max-age=30, stale-while-revalidate=60`)
 
 ## Security headers and CSP
 - Applied on HTML responses for What’s New reader/publisher surfaces (`/whats-new*`, `/admin/whats-new*`).
@@ -161,13 +166,28 @@ Read API (admin + allowlisted tenant):
 - `GET /api/whats-new/posts?limit=20&offset=0` (supports `cursor` alias for offset)
 - `GET /api/whats-new/posts/:slug`
 - `GET /api/whats-new/unread` -> `{ has_unread: boolean }`
+- `POST /api/whats-new/seen`
 
 Admin API (admin + allowlisted tenant + publisher allowlist + CSRF token for mutating methods):
 - `GET /api/admin/whats-new/posts?status=draft|published&tenant_id=<current-tenant|global>&limit=20&offset=0`
+- `GET /api/admin/whats-new/posts/:id`
+- `POST /api/admin/whats-new/preview`
 - `POST /api/admin/whats-new/posts`
 - `PUT /api/admin/whats-new/posts/:id`
 - `POST /api/admin/whats-new/posts/:id/publish`
 - `POST /api/admin/whats-new/posts/:id/unpublish`
+
+## API rate limiting and cache behavior
+- Scope key: per `(tenant_id, user_id)` when available, otherwise by IP fallback.
+- Read endpoints (`GET /api/whats-new/*`) and `POST /api/whats-new/seen` use read policy (`RATE_LIMIT_READ_PER_MIN`, default `120/min`).
+- Publisher mutating admin endpoints (`POST`/`PUT` on `/api/admin/whats-new/*`) use write policy (`RATE_LIMIT_WRITE_PER_MIN`, default `30/min`).
+- Exceeded limits return `429` with a generic body (`{ "error": "Too many requests" }`) and include `Retry-After`.
+- API responses expose `RateLimit-Limit`, `RateLimit-Remaining`, and `RateLimit-Reset` headers.
+- Read GET endpoints return:
+  - `Cache-Control: private, max-age=30, stale-while-revalidate=60`
+  - `Vary: Authorization, x-user-id, x-tenant-id`
+  - weak `ETag`; matching `If-None-Match` requests return `304`.
+- Production note: current limiter store is in-memory and therefore per app instance. Multi-instance deployments should use a shared store (for example Redis) to keep limits globally consistent.
 
 Audit log behavior:
 - All state-changing admin endpoints write to `changelog_audit_log`.

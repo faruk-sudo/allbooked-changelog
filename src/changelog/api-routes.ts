@@ -1,12 +1,19 @@
 import { Router, type Request, type Response } from "express";
 import type { AppConfig } from "../config";
 import { appLogger, type Logger } from "../security/logger";
+import {
+  createRateLimitMiddleware,
+  InMemoryRateLimitStore,
+  resolveRateLimitConfig,
+  type RateLimitStore
+} from "../security/rate-limit";
 import { getGuardedWhatsNewContext } from "./authz";
 import { renderMarkdownSafe } from "../security/markdown";
 import { applyWhatsNewReadGuards } from "./guards";
 import { requireCsrfToken } from "../security/csrf";
 import { parsePagination } from "./http";
 import { type ChangelogRepository, ValidationError, sanitizeSlugOrThrow } from "./repository";
+import { sendPrivateCachedReadJson } from "./read-cache";
 
 function handleReadError(res: Response, error: unknown): void {
   if (error instanceof ValidationError) {
@@ -20,12 +27,26 @@ function handleReadError(res: Response, error: unknown): void {
 export function createWhatsNewApiRouter(
   config: AppConfig,
   repository: ChangelogRepository,
-  logger: Logger = appLogger
+  logger: Logger = appLogger,
+  rateLimitStore: RateLimitStore = new InMemoryRateLimitStore()
 ): Router {
   const router = Router();
   applyWhatsNewReadGuards(router, config);
+  const rateLimitConfig = resolveRateLimitConfig(config);
+  const readRateLimiter = createRateLimitMiddleware({
+    enabled: rateLimitConfig.enabled,
+    keyPrefix: "whats-new-read",
+    limit: rateLimitConfig.readPerMinute,
+    store: rateLimitStore
+  });
+  const seenRateLimiter = createRateLimitMiddleware({
+    enabled: rateLimitConfig.enabled,
+    keyPrefix: "whats-new-seen",
+    limit: rateLimitConfig.readPerMinute,
+    store: rateLimitStore
+  });
 
-  router.get("/posts", async (req: Request, res: Response) => {
+  router.get("/posts", readRateLimiter, async (req: Request, res: Response) => {
     try {
       const context = getGuardedWhatsNewContext(req);
       const pagination = parsePagination(req);
@@ -45,7 +66,7 @@ export function createWhatsNewApiRouter(
         limit: pagination.limit
       });
 
-      res.status(200).json({
+      sendPrivateCachedReadJson(req, res, {
         items: posts.map((post) => ({
           id: post.id,
           title: post.title,
@@ -65,7 +86,7 @@ export function createWhatsNewApiRouter(
     }
   });
 
-  router.get("/unread", async (req: Request, res: Response) => {
+  router.get("/unread", readRateLimiter, async (req: Request, res: Response) => {
     try {
       const context = getGuardedWhatsNewContext(req);
       const hasUnread = await repository.hasUnreadPosts({
@@ -73,13 +94,13 @@ export function createWhatsNewApiRouter(
         userId: context.userId
       });
 
-      res.status(200).json({ has_unread: hasUnread });
+      sendPrivateCachedReadJson(req, res, { has_unread: hasUnread });
     } catch (error) {
       handleReadError(res, error);
     }
   });
 
-  router.post("/seen", requireCsrfToken, async (req: Request, res: Response) => {
+  router.post("/seen", requireCsrfToken, seenRateLimiter, async (req: Request, res: Response) => {
     try {
       const context = getGuardedWhatsNewContext(req);
       const lastSeenAt = await repository.markSeen({
@@ -98,7 +119,7 @@ export function createWhatsNewApiRouter(
     }
   });
 
-  router.get("/posts/:slug", async (req: Request, res: Response) => {
+  router.get("/posts/:slug", readRateLimiter, async (req: Request, res: Response) => {
     try {
       const context = getGuardedWhatsNewContext(req);
       const slugParam = req.params.slug;
@@ -116,7 +137,7 @@ export function createWhatsNewApiRouter(
         postId: post.id
       });
 
-      res.status(200).json({
+      sendPrivateCachedReadJson(req, res, {
         id: post.id,
         title: post.title,
         slug: post.slug,

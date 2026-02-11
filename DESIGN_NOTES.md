@@ -103,7 +103,7 @@ The repository was empty at implementation time, so no existing UI stack, stylin
 
 - Publisher allowlist is an env-driven stopgap until role-based publisher permissions are available from the identity system.
 - Pagination currently supports offset/cursor-as-offset for simplicity; can evolve to opaque cursors if feed size grows.
-- Endpoint-level rate limiting is not yet implemented because no shared limiter exists in this service today.
+- Endpoint-level rate limiting was deferred in Phase 1.4 and implemented later in Phase 4A (shared middleware + configurable limits).
 
 ### Verification evidence (live API checks)
 
@@ -334,3 +334,29 @@ All styling remains token-driven via semantic variables (`--color-*`, `--space-*
    - `CSP_CONNECT_SRC`
    - `CSP_IMG_SRC`
 7. Added automated route tests validating header presence and key CSP directives, including enforce vs report-only toggle coverage.
+
+## Phase 4A (4.2 + 4.3 slice) API rate limiting + read caching headers
+
+### Decisions
+
+1. Added a reusable rate-limit module (`src/security/rate-limit.ts`) with a pluggable store interface so the current in-memory strategy can be swapped to Redis/shared cache without route rewrites.
+2. Chose `(tenant_id, user_id)` as the primary key, with IP fallback when identity context is unavailable.
+3. Applied policies by route role:
+   - read endpoints (`GET /api/whats-new/*`): `120/min` default
+   - read-state write (`POST /api/whats-new/seen`): same read policy (`120/min` default)
+   - publisher mutating admin endpoints (`POST`/`PUT`): `30/min` default
+4. Added env controls with safe defaults:
+   - `RATE_LIMIT_ENABLED` (default `true`)
+   - `RATE_LIMIT_READ_PER_MIN` (default `120`)
+   - `RATE_LIMIT_WRITE_PER_MIN` (default `30`)
+5. On limit exceed, API now returns generic `429` (`{ error: "Too many requests" }`) and sets `Retry-After`, `RateLimit-Limit`, `RateLimit-Remaining`, and `RateLimit-Reset`.
+6. Added read-endpoint cache headers (`GET /api/whats-new/posts`, `GET /api/whats-new/posts/:slug`, `GET /api/whats-new/unread`) with secure defaults:
+   - `Cache-Control: private, max-age=30, stale-while-revalidate=60`
+   - `Vary: Authorization, x-user-id, x-tenant-id`
+   - weak `ETag` support with `304` on matching `If-None-Match`
+7. Kept caching private-only to avoid shared cache cross-tenant/user leakage while still reducing repeated in-app fetch load.
+
+### Tradeoffs and follow-ups
+
+- In-memory limiting is per-process only; multi-instance production should use a shared store for globally consistent enforcement.
+- ETag values are response-payload based (deterministic JSON hash), which is simple and robust for this phase; future public feeds may prefer version/timestamp-derived tags.

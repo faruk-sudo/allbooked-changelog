@@ -8,6 +8,12 @@ export interface SecurityHeadersConfig {
   cspImgSrc: string[];
 }
 
+export interface RateLimitConfig {
+  enabled: boolean;
+  readPerMinute: number;
+  writePerMinute: number;
+}
+
 export interface AppConfig {
   port: number;
   whatsNewKillSwitch: boolean;
@@ -20,6 +26,7 @@ export interface AppConfig {
   devAuthBypassUserRole: UserRole;
   devAuthBypassTenantId: string;
   devAuthBypassUserEmail?: string;
+  rateLimit?: Partial<RateLimitConfig>;
   securityHeaders?: Partial<SecurityHeadersConfig>;
 }
 
@@ -59,6 +66,19 @@ function parseCsvList(value: string | undefined): string[] {
     .split(",")
     .map((item) => item.trim())
     .filter((item) => item.length > 0);
+}
+
+function parsePositiveInteger(value: string | undefined, defaultValue: number): number {
+  if (!value) {
+    return defaultValue;
+  }
+
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    return defaultValue;
+  }
+
+  return parsed;
 }
 
 function normalizeCspSource(source: string): string {
@@ -128,6 +148,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const publisherAllowlistedEmails = parseCsvSet(env.WHATS_NEW_PUBLISHER_ALLOWLIST_EMAILS, (item) =>
     item.toLowerCase()
   );
+  const rateLimitEnabled = parseBoolean(env.RATE_LIMIT_ENABLED, true);
+  const rateLimitReadPerMinute = parsePositiveInteger(env.RATE_LIMIT_READ_PER_MIN, 120);
+  const rateLimitWritePerMinute = parsePositiveInteger(env.RATE_LIMIT_WRITE_PER_MIN, 30);
 
   // Local browser fallback must still satisfy allowlist middleware.
   if (devAuthBypassEnabled && allowlistEnabled) {
@@ -154,6 +177,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     devAuthBypassUserRole,
     devAuthBypassTenantId,
     devAuthBypassUserEmail,
+    rateLimit: {
+      enabled: rateLimitEnabled,
+      readPerMinute: rateLimitReadPerMinute,
+      writePerMinute: rateLimitWritePerMinute
+    },
     securityHeaders: {
       isProduction,
       cspReportOnly,
