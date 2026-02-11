@@ -11,7 +11,7 @@ import { getGuardedWhatsNewContext } from "./authz";
 import { renderMarkdownSafe } from "../security/markdown";
 import { applyWhatsNewReadGuards } from "./guards";
 import { requireCsrfToken } from "../security/csrf";
-import { parsePagination } from "./http";
+import { encodeFeedCursor, parsePublishedFeedPagination } from "./http";
 import { type ChangelogRepository, ValidationError, sanitizeSlugOrThrow } from "./repository";
 import { sendPrivateCachedReadJson } from "./read-cache";
 
@@ -49,25 +49,35 @@ export function createWhatsNewApiRouter(
   router.get("/posts", readRateLimiter, async (req: Request, res: Response) => {
     try {
       const context = getGuardedWhatsNewContext(req);
-      const pagination = parsePagination(req);
+      const pagination = parsePublishedFeedPagination(req);
       const posts = await repository.listPublishedPosts({
         tenantScope: { tenantId: context.tenantId },
         pagination: {
-          limit: pagination.limit,
-          offset: pagination.offset
+          limit: pagination.limit + 1,
+          cursor: pagination.cursor ?? undefined
         }
       });
+      const hasMore = posts.length > pagination.limit;
+      const visiblePosts = hasMore ? posts.slice(0, pagination.limit) : posts;
+      const lastPost = visiblePosts[visiblePosts.length - 1];
+      const nextCursor =
+        hasMore && lastPost
+          ? encodeFeedCursor({
+              publishedAt: lastPost.publishedAt,
+              id: lastPost.id
+            })
+          : null;
 
       logger.info("whats_new_api_posts_listed", {
         userId: context.userId,
         tenantId: context.tenantId,
-        count: posts.length,
-        offset: pagination.offset,
-        limit: pagination.limit
+        count: visiblePosts.length,
+        limit: pagination.limit,
+        cursorPresent: Boolean(pagination.cursor)
       });
 
       sendPrivateCachedReadJson(req, res, {
-        items: posts.map((post) => ({
+        items: visiblePosts.map((post) => ({
           id: post.id,
           title: post.title,
           slug: post.slug,
@@ -77,8 +87,7 @@ export function createWhatsNewApiRouter(
         })),
         pagination: {
           limit: pagination.limit,
-          offset: pagination.offset,
-          next_cursor: posts.length === pagination.limit ? pagination.nextCursor : null
+          next_cursor: nextCursor
         }
       });
     } catch (error) {

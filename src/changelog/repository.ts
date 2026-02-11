@@ -27,6 +27,16 @@ export interface PaginationInput {
   offset: number;
 }
 
+export interface PublicFeedCursor {
+  publishedAt: string;
+  id: string;
+}
+
+export interface PublicFeedPaginationInput {
+  limit: number;
+  cursor?: PublicFeedCursor;
+}
+
 export interface TenantScope {
   tenantId: string;
 }
@@ -104,7 +114,7 @@ export interface TransitionPostInput {
 
 export interface ListPublishedInput {
   tenantScope: TenantScope;
-  pagination: PaginationInput;
+  pagination: PublicFeedPaginationInput;
 }
 
 export interface HasUnreadInput {
@@ -151,6 +161,15 @@ interface PostRow {
   created_at: Date;
   updated_at: Date;
   revision: number;
+}
+
+interface PublishedSummaryRow {
+  id: string;
+  category: ChangelogPostCategory;
+  title: string;
+  slug: string;
+  published_at: Date;
+  excerpt_source: string;
 }
 
 interface AdminSummaryRow {
@@ -390,29 +409,37 @@ export class PostgresChangelogRepository implements ChangelogRepository {
   }
 
   async listPublishedPosts(input: ListPublishedInput): Promise<PublicPostSummary[]> {
-    const result = await this.pool.query<PostRow>(
+    const values: unknown[] = [input.tenantScope.tenantId];
+    const where: string[] = [
+      "status = 'published'",
+      "visibility = 'authenticated'",
+      "published_at IS NOT NULL",
+      "(tenant_id = $1 OR tenant_id IS NULL)"
+    ];
+
+    if (input.pagination.cursor) {
+      values.push(input.pagination.cursor.publishedAt);
+      values.push(input.pagination.cursor.id);
+      where.push(`(published_at, id) < ($${values.length - 1}::timestamptz, $${values.length}::uuid)`);
+    }
+
+    values.push(input.pagination.limit);
+
+    const result = await this.pool.query<PublishedSummaryRow>(
       `
         SELECT
           id,
-          tenant_id,
-          visibility,
-          status,
           category,
           title,
           slug,
-          body_markdown,
           published_at,
-          created_at,
-          updated_at,
-          revision
+          left(body_markdown, 1200) AS excerpt_source
         FROM changelog_posts
-        WHERE status = 'published'
-          AND visibility = 'authenticated'
-          AND (tenant_id = $1 OR tenant_id IS NULL)
+        WHERE ${where.join("\n          AND ")}
         ORDER BY published_at DESC, id DESC
-        LIMIT $2 OFFSET $3
+        LIMIT $${values.length}
       `,
-      [input.tenantScope.tenantId, input.pagination.limit, input.pagination.offset]
+      values
     );
 
     return result.rows.map((row) => ({
@@ -420,8 +447,8 @@ export class PostgresChangelogRepository implements ChangelogRepository {
       title: row.title,
       slug: row.slug,
       category: row.category,
-      publishedAt: row.published_at ? row.published_at.toISOString() : row.updated_at.toISOString(),
-      excerpt: createExcerpt(row.body_markdown)
+      publishedAt: row.published_at.toISOString(),
+      excerpt: createExcerpt(row.excerpt_source)
     }));
   }
 
@@ -1027,7 +1054,7 @@ export class InMemoryChangelogRepository implements ChangelogRepository {
   }
 
   async listPublishedPosts(input: ListPublishedInput): Promise<PublicPostSummary[]> {
-    return this.posts
+    const sorted = this.posts
       .filter(
         (post) =>
           post.status === "published" &&
@@ -1040,8 +1067,24 @@ export class InMemoryChangelogRepository implements ChangelogRepository {
           return publishedAtDiff;
         }
         return right.id.localeCompare(left.id);
-      })
-      .slice(input.pagination.offset, input.pagination.offset + input.pagination.limit)
+      });
+
+    const cursor = input.pagination.cursor;
+    const paged = cursor
+      ? sorted.filter((post) => {
+          const publishedAt = post.publishedAt ?? new Date(0).toISOString();
+          if (publishedAt < cursor.publishedAt) {
+            return true;
+          }
+          if (publishedAt > cursor.publishedAt) {
+            return false;
+          }
+          return post.id < cursor.id;
+        })
+      : sorted;
+
+    return paged
+      .slice(0, input.pagination.limit)
       .map((post) => ({
         id: post.id,
         title: post.title,

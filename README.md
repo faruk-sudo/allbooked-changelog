@@ -139,11 +139,16 @@ npm run db:migrate
 ```bash
 npm run db:seed:dev
 ```
-4. (Optional) roll back most recent migration:
+4. (Optional) inspect read-query plans:
+```bash
+npm run db:explain:reads
+```
+Set `EXPLAIN_TENANT_ID`, `EXPLAIN_USER_ID`, `EXPLAIN_SLUG`, `EXPLAIN_FEED_LIMIT`, `EXPLAIN_CURSOR_PUBLISHED_AT`, and `EXPLAIN_CURSOR_ID` to override defaults.
+5. (Optional) roll back most recent migration:
 ```bash
 npm run db:migrate:down
 ```
-5. (Optional) roll back multiple migrations:
+6. (Optional) roll back multiple migrations:
 ```bash
 npm run db:migrate:down -- 2
 ```
@@ -163,7 +168,7 @@ The smoke check verifies:
 
 ## API endpoints
 Read API (admin + allowlisted tenant):
-- `GET /api/whats-new/posts?limit=20&offset=0` (supports `cursor` alias for offset)
+- `GET /api/whats-new/posts?limit=20&cursor=<opaque-cursor>` (server cap: `limit <= 50`)
 - `GET /api/whats-new/posts/:slug`
 - `GET /api/whats-new/unread` -> `{ has_unread: boolean }`
 - `POST /api/whats-new/seen`

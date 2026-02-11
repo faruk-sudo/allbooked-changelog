@@ -360,3 +360,75 @@ All styling remains token-driven via semantic variables (`--color-*`, `--space-*
 
 - In-memory limiting is per-process only; multi-instance production should use a shared store for globally consistent enforcement.
 - ETag values are response-payload based (deterministic JSON hash), which is simple and robust for this phase; future public feeds may prefer version/timestamp-derived tags.
+
+## Phase 4B (4.3 remainder) read-path performance + scalability checks
+
+### Decisions
+
+1. Switched reader feed pagination from offset/cursor-as-offset to keyset cursor pagination using deterministic sort keys:
+   - order: `published_at DESC, id DESC`
+   - cursor payload: opaque token containing `{ published_at, id }`
+   - next page filter: `(published_at, id) < (cursor.published_at, cursor.id)`
+2. Kept strict server-side read limits:
+   - default `20`
+   - hard cap `50`
+   - invalid cursor/limit values return `400`
+3. Preserved exact reader scope in all read paths:
+   - `(tenant_id = currentTenant OR tenant_id IS NULL)`
+   - `status = 'published'`
+   - `visibility = 'authenticated'`
+4. Reduced feed query payload and avoided expensive per-item rendering:
+   - feed list does not render markdown to HTML
+   - feed list reads only a truncated markdown source (`left(body_markdown, 1200)`) and returns excerpt text
+   - detail endpoint renders sanitized HTML for one post only
+5. Added index-alignment migration (`0003_read_query_indexes`) to match read filters + sort:
+   - `(tenant_id, status, visibility, published_at DESC, id DESC)`
+   - `(status, visibility, published_at DESC, id DESC)`
+6. Added lightweight local query-plan script (`npm run db:explain:reads`) for feed/detail/unread `EXPLAIN (ANALYZE, BUFFERS)` checks.
+
+### Canonical read query shapes
+
+- Feed list (reader API):
+```sql
+SELECT id, category, title, slug, published_at, left(body_markdown, 1200)
+FROM changelog_posts
+WHERE status = 'published'
+  AND visibility = 'authenticated'
+  AND published_at IS NOT NULL
+  AND (tenant_id = $tenant OR tenant_id IS NULL)
+  AND (published_at, id) < ($cursor_published_at, $cursor_id) -- when cursor present
+ORDER BY published_at DESC, id DESC
+LIMIT $limit_plus_one;
+```
+
+- Detail by slug:
+```sql
+SELECT ...
+FROM changelog_posts
+WHERE slug = $slug
+  AND status = 'published'
+  AND visibility = 'authenticated'
+  AND (tenant_id = $tenant OR tenant_id IS NULL)
+LIMIT 1;
+```
+
+- Unread existence:
+```sql
+SELECT EXISTS (
+  SELECT 1
+  FROM changelog_posts
+  WHERE status = 'published'
+    AND visibility = 'authenticated'
+    AND published_at IS NOT NULL
+    AND (tenant_id = $tenant OR tenant_id IS NULL)
+    AND published_at > COALESCE(
+      (SELECT last_seen_at FROM changelog_read_state WHERE tenant_id = $tenant AND user_id = $user LIMIT 1),
+      to_timestamp(0)
+    )
+) AS has_unread;
+```
+
+### Why no rendered-HTML caching yet
+
+- This phase prioritized correctness, bounded query work, and payload reductions first.
+- Caching rendered HTML safely will require explicit invalidation keys (revision + tenant scope + visibility + sanitizer/version), which is better handled in a later phase to avoid stale/cross-scope content risk.

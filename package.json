@@ -13,6 +13,7 @@
     "db:migrate:down": "tsx scripts/db/migrate-down.ts",
     "db:seed:dev": "tsx scripts/db/seed-dev.ts",
     "db:smoke-check": "tsx scripts/db/smoke-check.ts",
+    "db:explain:reads": "tsx scripts/db/explain-read-paths.ts",
     "db:smoke": "tsx scripts/db/smoke-check.ts",
     "test": "vitest run",
     "test:watch": "vitest",

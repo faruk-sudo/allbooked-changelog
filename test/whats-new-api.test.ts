@@ -72,6 +72,18 @@ describe("What's New read API", () => {
         bodyMarkdown: "Global body",
         publishedAt: "2026-02-03T00:00:00.000Z",
         revision: 1
+      },
+      {
+        id: "4",
+        tenantId: null,
+        visibility: "authenticated",
+        status: "draft",
+        category: "new",
+        title: "Global draft",
+        slug: "global-draft",
+        bodyMarkdown: "Draft body",
+        publishedAt: null,
+        revision: 1
       }
     ]);
 
@@ -89,7 +101,7 @@ describe("What's New read API", () => {
   it("supports deterministic cursor pagination ordered by published_at desc and id desc", async () => {
     const repo = new InMemoryChangelogRepository([
       {
-        id: "a-id",
+        id: "00000000-0000-4000-8000-000000000001",
         tenantId: null,
         visibility: "authenticated",
         status: "published",
@@ -101,7 +113,7 @@ describe("What's New read API", () => {
         revision: 1
       },
       {
-        id: "z-id",
+        id: "00000000-0000-4000-8000-000000000002",
         tenantId: null,
         visibility: "authenticated",
         status: "published",
@@ -113,7 +125,7 @@ describe("What's New read API", () => {
         revision: 1
       },
       {
-        id: "b-id",
+        id: "00000000-0000-4000-8000-000000000000",
         tenantId: null,
         visibility: "authenticated",
         status: "published",
@@ -131,12 +143,57 @@ describe("What's New read API", () => {
     const firstPage = await withAdminHeaders(request(app).get("/api/whats-new/posts?limit=2"));
     expect(firstPage.status).toBe(200);
     expect(firstPage.body.items.map((item: { slug: string }) => item.slug)).toEqual(["z-post", "a-post"]);
-    expect(firstPage.body.pagination.next_cursor).toBe("2");
+    expect(firstPage.body.pagination.next_cursor).toBeTypeOf("string");
 
-    const secondPage = await withAdminHeaders(request(app).get("/api/whats-new/posts?limit=2&cursor=2"));
+    const secondPage = await withAdminHeaders(
+      request(app).get(`/api/whats-new/posts?limit=2&cursor=${firstPage.body.pagination.next_cursor}`)
+    );
     expect(secondPage.status).toBe(200);
     expect(secondPage.body.items.map((item: { slug: string }) => item.slug)).toEqual(["older-post"]);
     expect(secondPage.body.pagination.next_cursor).toBeNull();
+  });
+
+  it("caps feed limit at 50 and keeps feed payload lightweight", async () => {
+    const posts = Array.from({ length: 60 }, (_, index) => ({
+      id: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+      tenantId: null,
+      visibility: "authenticated" as const,
+      status: "published" as const,
+      category: "new" as const,
+      title: `Post ${index}`,
+      slug: `post-${index}`,
+      bodyMarkdown: `Body ${index}`,
+      publishedAt: "2026-02-04T00:00:00.000Z",
+      revision: 1
+    }));
+    const repo = new InMemoryChangelogRepository(posts);
+    const app = createApp(createConfig(), { changelogRepository: repo });
+
+    const response = await withAdminHeaders(request(app).get("/api/whats-new/posts?limit=999"));
+
+    expect(response.status).toBe(200);
+    expect(response.body.pagination.limit).toBe(50);
+    expect(response.body.items).toHaveLength(50);
+    expect(response.body.pagination.next_cursor).toBeTypeOf("string");
+    expect(response.body.items[0].slug).toBe("post-59");
+    expect(response.body.items[49].slug).toBe("post-10");
+    expect(response.body.items[0].body_markdown).toBeUndefined();
+  });
+
+  it("rejects invalid read-feed cursor values", async () => {
+    const app = createApp(createConfig(), { changelogRepository: new InMemoryChangelogRepository() });
+    const response = await withAdminHeaders(request(app).get("/api/whats-new/posts?cursor=not-a-cursor"));
+
+    expect(response.status).toBe(400);
+    expect(String(response.body.error || "")).toContain("cursor");
+  });
+
+  it("rejects invalid read-feed limit values", async () => {
+    const app = createApp(createConfig(), { changelogRepository: new InMemoryChangelogRepository() });
+    const response = await withAdminHeaders(request(app).get("/api/whats-new/posts?limit=-1"));
+
+    expect(response.status).toBe(400);
+    expect(String(response.body.error || "")).toContain("limit");
   });
 
   it("returns sanitized HTML on detail endpoint and neutralizes XSS payloads", async () => {
@@ -230,6 +287,49 @@ describe("What's New read API", () => {
 
     expect(response.status).toBe(200);
     expect(response.body.has_unread).toBe(true);
+  });
+
+  it("ignores drafts when computing unread state", async () => {
+    const repo = new InMemoryChangelogRepository(
+      [
+        {
+          id: "1",
+          tenantId: null,
+          visibility: "authenticated",
+          status: "published",
+          category: "new",
+          title: "Published update",
+          slug: "published-update",
+          bodyMarkdown: "Body",
+          publishedAt: "2026-02-01T00:00:00.000Z",
+          revision: 1
+        },
+        {
+          id: "2",
+          tenantId: null,
+          visibility: "authenticated",
+          status: "draft",
+          category: "new",
+          title: "Draft update",
+          slug: "draft-update",
+          bodyMarkdown: "Draft body",
+          publishedAt: null,
+          revision: 1
+        }
+      ],
+      [
+        {
+          tenantId: "tenant-alpha",
+          userId: "admin-1",
+          lastSeenAt: "2026-02-02T00:00:00.000Z"
+        }
+      ]
+    );
+    const app = createApp(createConfig(), { changelogRepository: repo });
+
+    const response = await withAdminHeaders(request(app).get("/api/whats-new/unread"));
+    expect(response.status).toBe(200);
+    expect(response.body.has_unread).toBe(false);
   });
 
   it("sets private cache headers on feed endpoint", async () => {
