@@ -54,6 +54,24 @@ State coverage is semantic and explicit (`hover`, `active`, `disabled`) so compo
 - Component/feature styles must use semantic variables (`var(--color-...)`).
 - New UI color requirements should be implemented by extending semantic tokens first, then consumed by components.
 
+## Layout Primitives
+
+Shared page width and horizontal rhythm are centralized in `src/styles/primitives.css`:
+
+- `--layout-max-width-narrow` (reader feed default)
+- `--layout-max-width-wide` (publisher/admin pages)
+- `--layout-max-width-detail` (detail reading page)
+- `--layout-page-padding-inline-mobile`
+- `--layout-page-padding-inline-desktop`
+
+Use `ds-page-container` with one variant per surface:
+
+- `ds-page-container ds-page-container--narrow`
+- `ds-page-container ds-page-container--wide`
+- `ds-page-container ds-page-container--detail`
+
+This keeps responsive max-width tuning in one place without adding hardcoded per-page widths.
+
 ## Token to CSS Variables
 
 - Source of truth: `tokens.json`

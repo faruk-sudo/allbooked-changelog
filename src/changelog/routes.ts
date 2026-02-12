@@ -525,13 +525,24 @@ const CLIENT_SCRIPT = `(() => {
 
   const renderWhatsNewFeedItem = (post) => {
     const itemEl = document.createElement("li");
-    itemEl.className = "wn-feed-item ds-surface ds-surface--raised";
+    itemEl.className = "wn-feed-item";
+
+    const metaRowEl = document.createElement("div");
+    metaRowEl.className = "wn-feed-item-meta";
 
     const category = getCategoryPresentation(post.category);
     const categoryEl = document.createElement("span");
     categoryEl.className = "wn-category-badge wn-category-badge--" + category.tone;
     categoryEl.textContent = category.label;
-    itemEl.appendChild(categoryEl);
+    metaRowEl.appendChild(categoryEl);
+
+    const publishedAt = typeof post.published_at === "string" ? post.published_at : "";
+    const dateEl = document.createElement("time");
+    dateEl.className = "ds-text ds-text--muted";
+    dateEl.dateTime = publishedAt;
+    dateEl.textContent = formatPublishedDate(publishedAt);
+    metaRowEl.appendChild(dateEl);
+    itemEl.appendChild(metaRowEl);
 
     const titleEl = document.createElement("h3");
     titleEl.className = "wn-feed-title";
@@ -540,6 +551,7 @@ const CLIENT_SCRIPT = `(() => {
     const postId = typeof post.id === "string" ? post.id.trim() : "";
     const canNavigate = detailBasePath.length > 0 && slug.length > 0;
     if (canNavigate) {
+      itemEl.classList.add("wn-feed-item--interactive");
       const linkEl = document.createElement("a");
       linkEl.className = "wn-post-link";
       linkEl.href = detailBasePath + encodeURIComponent(slug);
@@ -563,15 +575,8 @@ const CLIENT_SCRIPT = `(() => {
 
     itemEl.appendChild(titleEl);
 
-    const publishedAt = typeof post.published_at === "string" ? post.published_at : "";
-    const dateEl = document.createElement("time");
-    dateEl.className = "ds-text ds-text--muted";
-    dateEl.dateTime = publishedAt;
-    dateEl.textContent = formatPublishedDate(publishedAt);
-    itemEl.appendChild(dateEl);
-
     const excerptEl = document.createElement("p");
-    excerptEl.className = "ds-text ds-text--body";
+    excerptEl.className = "wn-feed-excerpt ds-text ds-text--muted";
     excerptEl.textContent = getSafeExcerpt(post);
     itemEl.appendChild(excerptEl);
 
@@ -1161,13 +1166,13 @@ function renderListPage(context: WhatsNewRequestContext, hasUnread: boolean): st
     <link rel="stylesheet" href="/whats-new/assets/styles.css" />
   </head>
   <body class="ds-root wn-page">
-    <main class="wn-main">
+    <main class="wn-main ds-page-container ds-page-container--narrow">
       <header class="wn-page-heading ds-stack ds-stack--vertical">
         <h1 class="ds-text ds-text--heading">What's New</h1>
         <p class="ds-text ds-text--muted">Tenant: ${escapeHtml(context.tenantId ?? "unknown")}</p>
         <p id="whats-new-status" class="ds-text ds-text--muted" aria-live="polite"></p>
       </header>
-      <section class="wn-list-feed ds-surface ds-surface--raised" aria-labelledby="whats-new-feed-heading">
+      <section class="wn-list-feed" aria-labelledby="whats-new-feed-heading">
         <div class="wn-list-feed-heading ds-stack ds-stack--vertical">
           <h2 id="whats-new-feed-heading" class="ds-text ds-text--heading">Latest updates</h2>
           <p class="ds-text ds-text--muted">Recent product updates for your workspace.</p>
@@ -1203,7 +1208,7 @@ function renderDetailPage(context: WhatsNewRequestContext, post: DetailPagePost,
     <link rel="stylesheet" href="/whats-new/assets/styles.css" />
   </head>
   <body class="ds-root wn-page">
-    <main class="wn-main wn-main--detail">
+    <main class="wn-main wn-main--detail ds-page-container ds-page-container--detail">
       <nav class="wn-detail-nav">
         <a class="wn-back-link" href="/whats-new">Back to What's New</a>
       </nav>

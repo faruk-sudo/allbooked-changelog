@@ -1,7 +1,32 @@
 .ds-root {
+  --layout-max-width-narrow: calc(var(--space-16) * 10);
+  --layout-max-width-wide: calc(var(--space-16) * 19);
+  --layout-max-width-detail: calc(var(--space-16) * 11);
+  --layout-page-padding-inline-mobile: var(--space-4);
+  --layout-page-padding-inline-desktop: var(--space-6);
   background: var(--color-bg-canvas);
   color: var(--color-text-primary);
   font-family: var(--font-family-sans);
+}
+
+.ds-page-container {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: var(--layout-page-max-width, var(--layout-max-width-narrow));
+  margin-inline: auto;
+  padding-inline: var(--layout-page-padding-inline-mobile);
+}
+
+.ds-page-container--narrow {
+  --layout-page-max-width: var(--layout-max-width-narrow);
+}
+
+.ds-page-container--wide {
+  --layout-page-max-width: var(--layout-max-width-wide);
+}
+
+.ds-page-container--detail {
+  --layout-page-max-width: var(--layout-max-width-detail);
 }
 
 .ds-text {
@@ -143,5 +168,11 @@
 @media (prefers-reduced-motion: reduce) {
   .ds-button {
     transition: none;
+  }
+}
+
+@media (min-width: 48rem) {
+  .ds-page-container {
+    padding-inline: var(--layout-page-padding-inline-desktop);
   }
 }

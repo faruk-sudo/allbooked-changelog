@@ -63,6 +63,20 @@ The repository was empty at implementation time, so no existing UI stack, stylin
 - We kept status colors muted rather than fully monochrome because removing color from all status affordances would reduce scanability and increase accessibility risk.
 - We used neutral focus rings (instead of brand accent rings) to fit the monochrome goal while remaining visible in both light and dark themes.
 
+## What's New UI modernization pass (February 12, 2026)
+
+### Decisions
+
+1. Added shared layout container variants in `src/styles/primitives.css` (`ds-page-container--narrow`, `--wide`, `--detail`) so max widths and page padding are tuned in one place.
+2. Flattened reader feed framing: removed outer surface card on `/whats-new`, switched item rendering to divider-based list rows with meta/header/excerpt hierarchy, and kept excerpt whitespace normalization client-side.
+3. Widened publisher list layout to the new `wide` container; reworked filters into an inline toolbar and tightened table density with truncation and single-row inline actions.
+4. Rebuilt draft editor layout into responsive main/content + metadata sidebar structure; moved primary actions to the editor header; converted validation/warnings into calmer publish checklist surfaces.
+
+### Tradeoffs
+
+- Kept the existing server-rendered templates and vanilla client scripts for safety; no frontend framework migration was introduced.
+- Used text action buttons (`Edit`, `View`) as the fallback for table actions to avoid introducing new icon dependencies while still fixing alignment and accessibility.
+
 ## Phase 1.1 DB schema (What's New)
 
 ### Decisions

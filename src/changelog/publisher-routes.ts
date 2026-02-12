@@ -184,14 +184,18 @@ const LIST_CLIENT_SCRIPT = `(() => {
   const createTitleCell = (post) => {
     const wrap = document.createElement("div");
     wrap.className = "wn-admin-title-cell";
+    const safeTitle = typeof post.title === "string" && post.title.trim().length > 0 ? post.title : "Untitled";
+    const safeSlug = typeof post.slug === "string" ? "/" + post.slug : "-";
 
     const title = document.createElement("p");
-    title.className = "ds-text ds-text--body";
-    title.textContent = typeof post.title === "string" && post.title.trim().length > 0 ? post.title : "Untitled";
+    title.className = "wn-admin-title-cell__title ds-text ds-text--body";
+    title.textContent = safeTitle;
+    title.title = safeTitle;
 
     const slug = document.createElement("p");
-    slug.className = "ds-text ds-text--muted";
-    slug.textContent = typeof post.slug === "string" ? "/" + post.slug : "-";
+    slug.className = "wn-admin-title-cell__slug ds-text ds-text--muted";
+    slug.textContent = safeSlug;
+    slug.title = safeSlug;
 
     wrap.appendChild(title);
     wrap.appendChild(slug);
@@ -207,26 +211,31 @@ const LIST_CLIENT_SCRIPT = `(() => {
     actions.className = "wn-admin-row-actions";
 
     const editLink = document.createElement("a");
-    editLink.className = "ds-button ds-button--secondary";
+    editLink.className = "ds-button ds-button--ghost wn-admin-action-button";
     editLink.href = "/admin/whats-new/" + encodeURIComponent(String(post.id || "")) + "/edit";
+    editLink.setAttribute("aria-label", "Edit post");
+    editLink.title = "Edit post";
     editLink.textContent = "Edit";
 
     actions.appendChild(editLink);
 
     if (post.status === "published" && typeof post.slug === "string" && post.slug.length > 0) {
       const viewLink = document.createElement("a");
-      viewLink.className = "ds-button ds-button--ghost";
+      viewLink.className = "ds-button ds-button--ghost wn-admin-action-button";
       viewLink.href = "/whats-new/" + encodeURIComponent(post.slug);
       viewLink.target = "_blank";
       viewLink.rel = "noopener noreferrer";
+      viewLink.setAttribute("aria-label", "View published post");
+      viewLink.title = "View published post";
       viewLink.textContent = "View";
       actions.appendChild(viewLink);
     } else {
       const viewButton = document.createElement("button");
-      viewButton.className = "ds-button ds-button--ghost";
+      viewButton.className = "ds-button ds-button--ghost wn-admin-action-button";
       viewButton.type = "button";
       viewButton.disabled = true;
       viewButton.title = "Only published posts can be viewed.";
+      viewButton.setAttribute("aria-label", "View unavailable");
       viewButton.textContent = "View";
       actions.appendChild(viewButton);
     }
@@ -610,7 +619,7 @@ const EDITOR_CLIENT_SCRIPT = `(() => {
 
     for (const message of messages) {
       const item = document.createElement("li");
-      item.className = "ds-text ds-text--muted";
+      item.className = "wn-admin-checklist-item ds-text ds-text--muted";
       item.textContent = message;
       validationSummaryListEl.appendChild(item);
     }
@@ -779,10 +788,10 @@ const EDITOR_CLIENT_SCRIPT = `(() => {
   const applyWarnings = () => {
     const warnings = [];
     if (titleInputEl.value.trim().length === 0) {
-      warnings.push("Title is empty. You can keep drafting, but publishing requires a title.");
+      warnings.push("Add a title before publishing.");
     }
     if (bodyInputEl.value.trim().length === 0) {
-      warnings.push("Body is empty. You can keep drafting, but publishing requires content.");
+      warnings.push("Add body content before publishing.");
     }
 
     warningListEl.innerHTML = "";
@@ -793,7 +802,7 @@ const EDITOR_CLIENT_SCRIPT = `(() => {
 
     for (const warning of warnings) {
       const item = document.createElement("li");
-      item.className = "ds-text ds-text--muted";
+      item.className = "wn-admin-checklist-item ds-text ds-text--muted";
       item.textContent = warning;
       warningListEl.appendChild(item);
     }
@@ -914,7 +923,7 @@ const EDITOR_CLIENT_SCRIPT = `(() => {
       summaryMessages.push(message);
     }
 
-    if (summaryMessages.length > 1) {
+    if (requirePublishFields && summaryMessages.length > 0) {
       showValidationSummary(summaryMessages);
     }
 
@@ -1004,7 +1013,7 @@ const EDITOR_CLIENT_SCRIPT = `(() => {
       }
     }
 
-    if (summaryMessages.length > 1) {
+    if (summaryMessages.length > 0) {
       showValidationSummary(summaryMessages);
     }
 
@@ -1489,7 +1498,7 @@ function renderAdminPage(userId: string, role: string, tenantId: string): string
     <link rel="stylesheet" href="/admin/whats-new/assets/styles.css" />
   </head>
   <body class="ds-root wn-admin-page">
-    <main class="wn-admin-main">
+    <main class="wn-admin-main ds-page-container ds-page-container--wide">
       <header class="wn-admin-header ds-stack ds-stack--vertical">
         <h1 class="ds-text ds-text--heading">What's New Publisher</h1>
         <p class="ds-text ds-text--muted">Manage drafts and published changelog updates for tenant <strong>${escapeHtml(
@@ -1508,7 +1517,7 @@ function renderAdminPage(userId: string, role: string, tenantId: string): string
           </div>
 
           <form id="whats-new-admin-search-form" class="wn-admin-filters" role="search">
-            <div class="wn-admin-field">
+            <div class="wn-admin-field wn-admin-field--compact">
               <label class="wn-admin-field__label ds-text ds-text--muted" for="whats-new-admin-status-filter">Status</label>
               <select id="whats-new-admin-status-filter" class="wn-admin-select" name="status">
                 <option value="all">All</option>
@@ -1517,7 +1526,7 @@ function renderAdminPage(userId: string, role: string, tenantId: string): string
               </select>
             </div>
 
-            <div class="wn-admin-field">
+            <div class="wn-admin-field wn-admin-field--compact">
               <label class="wn-admin-field__label ds-text ds-text--muted" for="whats-new-admin-scope-filter">Scope</label>
               <select id="whats-new-admin-scope-filter" class="wn-admin-select" name="scope">
                 <option value="all">All</option>
@@ -1531,13 +1540,12 @@ function renderAdminPage(userId: string, role: string, tenantId: string): string
               <div class="wn-admin-search-row">
                 <input
                   id="whats-new-admin-search-input"
-                  class="wn-admin-input"
+                  class="wn-admin-input wn-admin-input--search"
                   name="q"
                   type="search"
                   autocomplete="off"
                   placeholder="Search title or slug"
                 />
-                <button class="ds-button ds-button--secondary" type="submit">Search</button>
               </div>
             </div>
           </form>
@@ -1558,13 +1566,13 @@ function renderAdminPage(userId: string, role: string, tenantId: string): string
           <table class="wn-admin-table" aria-label="What's New posts">
             <thead>
               <tr>
-                <th scope="col">Status</th>
-                <th scope="col">Title / Slug</th>
-                <th scope="col">Category</th>
-                <th scope="col">Scope</th>
-                <th scope="col">Published</th>
-                <th scope="col">Updated</th>
-                <th scope="col">Actions</th>
+                <th class="wn-admin-table__head wn-admin-table__head--status" scope="col">Status</th>
+                <th class="wn-admin-table__head wn-admin-table__head--title" scope="col">Title</th>
+                <th class="wn-admin-table__head wn-admin-table__head--category" scope="col">Category</th>
+                <th class="wn-admin-table__head wn-admin-table__head--scope" scope="col">Scope</th>
+                <th class="wn-admin-table__head wn-admin-table__head--date" scope="col">Published</th>
+                <th class="wn-admin-table__head wn-admin-table__head--date" scope="col">Updated</th>
+                <th class="wn-admin-table__head wn-admin-table__head--actions" scope="col">Actions</th>
               </tr>
             </thead>
             <tbody id="whats-new-admin-table-body"></tbody>
@@ -1614,7 +1622,7 @@ function renderEditorPage(
     <link rel="stylesheet" href="/admin/whats-new/assets/styles.css" />
   </head>
   <body class="ds-root wn-admin-page">
-    <main class="wn-admin-main">
+    <main class="wn-admin-main ds-page-container ds-page-container--wide">
       <header class="wn-admin-header ds-stack ds-stack--vertical">
         <a class="ds-button ds-button--ghost wn-admin-editor-back" href="/admin/whats-new">Back to post list</a>
         <h1 class="ds-text ds-text--heading">${escapeHtml(heading)}</h1>
@@ -1623,148 +1631,12 @@ function renderEditorPage(
 
       <section class="wn-admin-editor-shell ds-surface ds-surface--raised" aria-labelledby="whats-new-editor-heading">
         <div class="wn-admin-editor-shell__header">
-          <h2 id="whats-new-editor-heading" class="ds-text ds-text--heading">Draft details</h2>
-          <p id="whats-new-editor-save-status" class="ds-text ds-text--muted" aria-live="polite">Loading draft...</p>
-        </div>
-
-        <p id="whats-new-editor-banner" class="wn-admin-editor-banner ds-text" hidden></p>
-        <section
-          id="whats-new-editor-validation-summary"
-          class="wn-admin-editor-validation-summary ds-surface ds-surface--sunken"
-          aria-label="Validation summary"
-          hidden
-        >
-          <p class="ds-text ds-text--body">Fix the following before continuing:</p>
-          <ul id="whats-new-editor-validation-summary-list" class="wn-admin-editor-validation-summary-list"></ul>
-        </section>
-        <ul id="whats-new-editor-warning-list" class="wn-admin-editor-warning-list ds-surface ds-surface--sunken" hidden></ul>
-
-        <form id="whats-new-editor-form" class="wn-admin-editor-form">
-          <div class="wn-admin-editor-grid">
-            <div class="wn-admin-field">
-              <label class="wn-admin-field__label ds-text ds-text--muted" for="whats-new-editor-title">Title</label>
-              <input
-                id="whats-new-editor-title"
-                class="wn-admin-input"
-                name="title"
-                type="text"
-                maxlength="140"
-                autocomplete="off"
-                placeholder="Release title"
-              />
-              <p class="wn-admin-inline-hint ds-text ds-text--muted">Required for publishing.</p>
-              <p id="whats-new-editor-title-error" class="wn-admin-inline-error ds-text" aria-live="polite"></p>
+          <div class="wn-admin-editor-shell__title-block">
+            <div class="wn-admin-editor-shell__title-row">
+              <h2 id="whats-new-editor-heading" class="ds-text ds-text--heading">Draft details</h2>
+              <span id="whats-new-editor-status-pill" class="wn-admin-pill wn-admin-pill--status wn-admin-pill--draft">Draft</span>
             </div>
-
-            <div class="wn-admin-field">
-              <label class="wn-admin-field__label ds-text ds-text--muted" for="whats-new-editor-category">Category</label>
-              <select id="whats-new-editor-category" class="wn-admin-select" name="category" required>
-                <option value="new">New</option>
-                <option value="improvement">Improvement</option>
-                <option value="fix">Fix</option>
-              </select>
-              <p id="whats-new-editor-category-error" class="wn-admin-inline-error ds-text" aria-live="polite"></p>
-            </div>
-
-            <div class="wn-admin-field">
-              <label class="wn-admin-field__label ds-text ds-text--muted" for="whats-new-editor-scope">Scope</label>
-              <select id="whats-new-editor-scope" class="wn-admin-select" name="scope">
-                <option value="tenant">This tenant</option>
-                <option value="global">Global</option>
-              </select>
-              <p class="wn-admin-inline-hint ds-text ds-text--muted">Global maps to <code>tenant_id=null</code>.</p>
-            </div>
-
-            <div class="wn-admin-field">
-              <label class="wn-admin-field__label ds-text ds-text--muted" for="whats-new-editor-visibility">Visibility</label>
-              <input
-                id="whats-new-editor-visibility"
-                class="wn-admin-input"
-                name="visibility"
-                type="text"
-                value="Authenticated (locked for v1)"
-                readonly
-                aria-readonly="true"
-              />
-            </div>
-
-            <div class="wn-admin-field">
-              <label class="wn-admin-field__label ds-text ds-text--muted" for="whats-new-editor-status">Status</label>
-              <input
-                id="whats-new-editor-status"
-                class="wn-admin-input"
-                name="status"
-                type="text"
-                value="Draft"
-                readonly
-                aria-readonly="true"
-              />
-              <span id="whats-new-editor-status-pill" class="wn-admin-pill wn-admin-pill--status wn-admin-pill--draft">
-                Draft
-              </span>
-            </div>
-
-            <div class="wn-admin-field">
-              <label class="wn-admin-field__label ds-text ds-text--muted" for="whats-new-editor-published-at">Published at</label>
-              <input
-                id="whats-new-editor-published-at"
-                class="wn-admin-input"
-                name="published_at"
-                type="text"
-                value="Not published"
-                readonly
-                aria-readonly="true"
-              />
-            </div>
-          </div>
-
-          <div class="wn-admin-field">
-            <label class="wn-admin-field__label ds-text ds-text--muted" for="whats-new-editor-slug">Slug</label>
-            <input
-              id="whats-new-editor-slug"
-              class="wn-admin-input"
-              name="slug"
-              type="text"
-              maxlength="100"
-              autocomplete="off"
-              placeholder="auto-generated-from-title"
-            />
-            <p class="wn-admin-inline-hint ds-text ds-text--muted">
-              Stable URL path segment. Lowercase letters, numbers, and hyphens only.
-            </p>
-            <p id="whats-new-editor-slug-error" class="wn-admin-inline-error ds-text" aria-live="polite"></p>
-            <div id="whats-new-editor-slug-suggestion" class="wn-admin-inline-hint ds-text ds-text--muted" hidden></div>
-            <button
-              id="whats-new-editor-slug-suggestion-button"
-              class="ds-button ds-button--secondary"
-              type="button"
-              hidden
-            >
-              Use suggestion
-            </button>
-          </div>
-
-          <div class="wn-admin-editor-body-layout">
-            <div class="wn-admin-field">
-              <label class="wn-admin-field__label ds-text ds-text--muted" for="whats-new-editor-body">Body markdown</label>
-              <textarea
-                id="whats-new-editor-body"
-                class="wn-admin-textarea"
-                name="body_markdown"
-                rows="18"
-                placeholder="Write in markdown..."
-              ></textarea>
-              <p class="wn-admin-inline-hint ds-text ds-text--muted">Required for publishing.</p>
-              <p id="whats-new-editor-body-error" class="wn-admin-inline-error ds-text" aria-live="polite"></p>
-            </div>
-
-            <section class="wn-admin-editor-preview-pane ds-surface ds-surface--sunken" aria-label="Preview">
-              <div class="wn-admin-editor-preview-header">
-                <h3 class="ds-text ds-text--body">Preview</h3>
-                <p id="whats-new-editor-preview-status" class="ds-text ds-text--muted" aria-live="polite">Rendering preview...</p>
-              </div>
-              <div id="whats-new-editor-preview" class="wn-admin-editor-preview-body"></div>
-            </section>
+            <p id="whats-new-editor-save-status" class="ds-text ds-text--muted" aria-live="polite">Loading draft...</p>
           </div>
 
           <div class="wn-admin-editor-actions">
@@ -1776,9 +1648,11 @@ function renderEditorPage(
               rel="noopener noreferrer"
               hidden
             >
-              View in reader
+              View
             </a>
-            <button id="whats-new-editor-save-button" class="ds-button ds-button--secondary" type="submit">Save draft</button>
+            <button id="whats-new-editor-save-button" class="ds-button ds-button--secondary" form="whats-new-editor-form" type="submit">
+              Save draft
+            </button>
             <button
               id="whats-new-editor-publish-button"
               class="ds-button ds-button--primary"
@@ -1787,6 +1661,149 @@ function renderEditorPage(
             >
               Publish
             </button>
+          </div>
+        </div>
+
+        <p id="whats-new-editor-banner" class="wn-admin-editor-banner ds-text" hidden></p>
+
+        <form id="whats-new-editor-form" class="wn-admin-editor-form">
+          <div class="wn-admin-editor-layout">
+            <section class="wn-admin-editor-main">
+              <div class="wn-admin-field">
+                <label class="wn-admin-field__label ds-text ds-text--muted" for="whats-new-editor-title">Title</label>
+                <input
+                  id="whats-new-editor-title"
+                  class="wn-admin-input"
+                  name="title"
+                  type="text"
+                  maxlength="140"
+                  autocomplete="off"
+                  placeholder="Release title"
+                />
+                <p class="wn-admin-inline-hint ds-text ds-text--muted">Required for publishing.</p>
+                <p id="whats-new-editor-title-error" class="wn-admin-inline-error ds-text" aria-live="polite"></p>
+              </div>
+
+              <div class="wn-admin-field">
+                <label class="wn-admin-field__label ds-text ds-text--muted" for="whats-new-editor-slug">Slug</label>
+                <input
+                  id="whats-new-editor-slug"
+                  class="wn-admin-input"
+                  name="slug"
+                  type="text"
+                  maxlength="100"
+                  autocomplete="off"
+                  placeholder="auto-generated-from-title"
+                />
+                <p class="wn-admin-inline-hint ds-text ds-text--muted">
+                  Stable URL path segment. Lowercase letters, numbers, and hyphens only.
+                </p>
+                <p id="whats-new-editor-slug-error" class="wn-admin-inline-error ds-text" aria-live="polite"></p>
+                <div id="whats-new-editor-slug-suggestion" class="wn-admin-inline-hint ds-text ds-text--muted" hidden></div>
+                <button
+                  id="whats-new-editor-slug-suggestion-button"
+                  class="ds-button ds-button--secondary"
+                  type="button"
+                  hidden
+                >
+                  Use suggestion
+                </button>
+              </div>
+
+              <div class="wn-admin-editor-body-layout">
+                <div class="wn-admin-field">
+                  <label class="wn-admin-field__label ds-text ds-text--muted" for="whats-new-editor-body">Body markdown</label>
+                  <textarea
+                    id="whats-new-editor-body"
+                    class="wn-admin-textarea"
+                    name="body_markdown"
+                    rows="18"
+                    placeholder="Write in markdown..."
+                  ></textarea>
+                  <p class="wn-admin-inline-hint ds-text ds-text--muted">Required for publishing.</p>
+                  <p id="whats-new-editor-body-error" class="wn-admin-inline-error ds-text" aria-live="polite"></p>
+                </div>
+
+                <section class="wn-admin-editor-preview-pane ds-surface ds-surface--sunken" aria-label="Preview">
+                  <div class="wn-admin-editor-preview-header">
+                    <h3 class="ds-text ds-text--body">Preview</h3>
+                    <p id="whats-new-editor-preview-status" class="ds-text ds-text--muted" aria-live="polite">Rendering preview...</p>
+                  </div>
+                  <div id="whats-new-editor-preview" class="wn-admin-editor-preview-body"></div>
+                </section>
+              </div>
+            </section>
+
+            <aside class="wn-admin-editor-sidebar ds-surface ds-surface--sunken" aria-label="Draft metadata">
+              <div class="wn-admin-field">
+                <label class="wn-admin-field__label ds-text ds-text--muted" for="whats-new-editor-category">Category</label>
+                <select id="whats-new-editor-category" class="wn-admin-select" name="category" required>
+                  <option value="new">New</option>
+                  <option value="improvement">Improvement</option>
+                  <option value="fix">Fix</option>
+                </select>
+                <p id="whats-new-editor-category-error" class="wn-admin-inline-error ds-text" aria-live="polite"></p>
+              </div>
+
+              <div class="wn-admin-field">
+                <label class="wn-admin-field__label ds-text ds-text--muted" for="whats-new-editor-scope">Scope</label>
+                <select id="whats-new-editor-scope" class="wn-admin-select" name="scope">
+                  <option value="tenant">This tenant</option>
+                  <option value="global">Global</option>
+                </select>
+                <p class="wn-admin-inline-hint ds-text ds-text--muted">Global maps to <code>tenant_id=null</code>.</p>
+              </div>
+
+              <div class="wn-admin-field">
+                <label class="wn-admin-field__label ds-text ds-text--muted" for="whats-new-editor-visibility">Visibility</label>
+                <input
+                  id="whats-new-editor-visibility"
+                  class="wn-admin-input"
+                  name="visibility"
+                  type="text"
+                  value="Authenticated (locked for v1)"
+                  readonly
+                  aria-readonly="true"
+                />
+              </div>
+
+              <div class="wn-admin-field">
+                <label class="wn-admin-field__label ds-text ds-text--muted" for="whats-new-editor-status">Status</label>
+                <input
+                  id="whats-new-editor-status"
+                  class="wn-admin-input"
+                  name="status"
+                  type="text"
+                  value="Draft"
+                  readonly
+                  aria-readonly="true"
+                />
+              </div>
+
+              <div class="wn-admin-field">
+                <label class="wn-admin-field__label ds-text ds-text--muted" for="whats-new-editor-published-at">Published at</label>
+                <input
+                  id="whats-new-editor-published-at"
+                  class="wn-admin-input"
+                  name="published_at"
+                  type="text"
+                  value="Not published"
+                  readonly
+                  aria-readonly="true"
+                />
+              </div>
+
+              <section
+                id="whats-new-editor-validation-summary"
+                class="wn-admin-editor-validation-summary"
+                aria-label="Publish checklist"
+                hidden
+              >
+                <p class="ds-text ds-text--body">Publish checklist</p>
+                <ul id="whats-new-editor-validation-summary-list" class="wn-admin-editor-validation-summary-list"></ul>
+              </section>
+              <ul id="whats-new-editor-warning-list" class="wn-admin-editor-warning-list" hidden></ul>
+            </aside>
           </div>
         </form>
       </section>
