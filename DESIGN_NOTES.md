@@ -104,6 +104,41 @@ The repository was empty at implementation time, so no existing UI stack, stylin
    - `.wn-admin-editor-content__editor .wn-admin-textarea`
    - `.wn-admin-editor-preview-body`
 
+## Markdown editor UX modernization (February 12, 2026)
+
+### Agent decision clause
+
+"Infer the current stack and conventions from the repository. If multiple viable architectures exist, pick the safest and simplest that meets requirements. Explain key decisions briefly in a DESIGN_NOTES.md (or existing doc), and proceed."
+
+### Decisions
+
+1. Kept the server-rendered editor page + inline script architecture (`renderEditorPage` + `EDITOR_CLIENT_SCRIPT`) and avoided introducing contenteditable/WYSIWYG dependencies.
+2. Added a local markdown toolbar above the textarea with button-driven formatting actions (bold, italic, heading, link, bullet list, numbered list, quote, code block, inline code, horizontal rule).
+3. Implemented keyboard shortcuts directly on the markdown textarea only:
+   - `Cmd/Ctrl + B` bold
+   - `Cmd/Ctrl + I` italic
+   - `Cmd/Ctrl + K` link insert
+4. Added a compact "Formatting help" collapsible section near the toolbar with short practical examples.
+5. Added `src/changelog/markdown-editor-links.ts` for safe link protocol validation (`http:`, `https:`, `mailto:` only), and used its allowlist in script generation to keep behavior and tests aligned.
+
+### Security notes
+
+1. Preview rendering stays on `/api/admin/whats-new/preview` and continues to use server-side sanitized HTML.
+2. Toolbar actions only mutate markdown plaintext in the textarea; no raw HTML rendering path was added.
+3. Link insertion blocks dangerous URL schemes (`javascript:`, `data:`) and rejects unsupported schemes.
+4. No authz/allowlist route-guard logic was changed.
+
+### Verification
+
+1. Automated:
+   - Added `test/markdown-editor-links.test.ts` to cover link scheme validation.
+   - Expanded `test/whats-new-publisher-route.test.ts` to assert toolbar/help markup and script hooks.
+2. Manual:
+   - Create/edit draft: validate each toolbar button for both selected text and empty selection.
+   - Confirm shortcut behavior in body textarea (`Cmd/Ctrl+B`, `Cmd/Ctrl+I`, `Cmd/Ctrl+K`).
+   - Link prompt: verify `https://...` inserts markdown link and `javascript:alert(1)` is blocked with inline toolbar message.
+   - Resize viewport: verify desktop split (editor wider than preview) and stacked layout on smaller screens with no overlap.
+
 ## Phase 1.1 DB schema (What's New)
 
 ### Decisions

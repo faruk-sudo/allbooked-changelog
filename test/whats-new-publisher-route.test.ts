@@ -98,6 +98,11 @@ describe("What's New publisher admin route", () => {
     expect(createResponse.text).toContain('id="whats-new-editor-save-button"');
     expect(createResponse.text).toContain('id="whats-new-editor-publish-button"');
     expect(createResponse.text).toContain('id="whats-new-editor-validation-summary"');
+    expect(createResponse.text).toContain('id="whats-new-editor-md-toolbar"');
+    expect(createResponse.text).toContain('data-md-format="bold"');
+    expect(createResponse.text).toContain('id="whats-new-editor-md-help-toggle"');
+    expect(createResponse.text).toContain('id="whats-new-editor-md-help"');
+    expect(createResponse.text).toContain('id="whats-new-editor-toolbar-message"');
 
     const editResponse = await withHeaders(request(app).get("/admin/whats-new/post-123/edit"));
     expect(editResponse.status).toBe(200);
@@ -121,6 +126,9 @@ describe("What's New publisher admin route", () => {
     expect(response.text).toContain("Save & Publish");
     expect(response.text).toContain("Slug already in use.");
     expect(response.text).toContain("Try suggested slug:");
+    expect(response.text).toContain("toggleWrappedSelection");
+    expect(response.text).toContain("Invalid URL. Only http://, https://, and mailto: links are allowed.");
+    expect(response.text).toContain('if (!(event.metaKey || event.ctrlKey) || event.altKey)');
   });
 
   it("supports browser access to /admin/whats-new with dev auth bypass and no explicit publisher allowlist", async () => {

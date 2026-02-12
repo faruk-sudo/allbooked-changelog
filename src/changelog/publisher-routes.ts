@@ -6,6 +6,7 @@ import { createWhatsNewHtmlSecurityHeaders } from "../security/headers";
 import { appLogger, type Logger } from "../security/logger";
 import { getGuardedWhatsNewContext } from "./authz";
 import { applyWhatsNewPublisherGuards } from "./guards";
+import { ALLOWED_MARKDOWN_LINK_PROTOCOLS } from "./markdown-editor-links";
 import type { ChangelogRepository } from "./repository";
 
 const STYLESHEET = [
@@ -430,6 +431,7 @@ const EDITOR_CLIENT_SCRIPT = `(() => {
   const PREVIEW_DEBOUNCE_MS = 300;
   const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
   const CATEGORY_VALUES = new Set(["new", "improvement", "fix"]);
+  const ALLOWED_LINK_PROTOCOLS = new Set(${JSON.stringify(ALLOWED_MARKDOWN_LINK_PROTOCOLS)});
   const SLUG_MAX_LENGTH = 100;
   const TITLE_MAX_LENGTH = 140;
   const BODY_MAX_LENGTH = 50000;
@@ -463,6 +465,10 @@ const EDITOR_CLIENT_SCRIPT = `(() => {
   const slugSuggestionEl = document.getElementById("whats-new-editor-slug-suggestion");
   const slugSuggestionButtonEl = document.getElementById("whats-new-editor-slug-suggestion-button");
   const bodyInputEl = document.getElementById("whats-new-editor-body");
+  const toolbarEl = document.getElementById("whats-new-editor-md-toolbar");
+  const toolbarMessageEl = document.getElementById("whats-new-editor-toolbar-message");
+  const toolbarHelpToggleEl = document.getElementById("whats-new-editor-md-help-toggle");
+  const toolbarHelpEl = document.getElementById("whats-new-editor-md-help");
   const previewPaneEl = document.getElementById("whats-new-editor-preview");
   const previewStatusEl = document.getElementById("whats-new-editor-preview-status");
   const warningListEl = document.getElementById("whats-new-editor-warning-list");
@@ -500,6 +506,10 @@ const EDITOR_CLIENT_SCRIPT = `(() => {
     !(slugSuggestionEl instanceof HTMLElement) ||
     !(slugSuggestionButtonEl instanceof HTMLButtonElement) ||
     !(bodyInputEl instanceof HTMLTextAreaElement) ||
+    !(toolbarEl instanceof HTMLElement) ||
+    !(toolbarMessageEl instanceof HTMLElement) ||
+    !(toolbarHelpToggleEl instanceof HTMLButtonElement) ||
+    !(toolbarHelpEl instanceof HTMLElement) ||
     !(previewPaneEl instanceof HTMLElement) ||
     !(previewStatusEl instanceof HTMLElement) ||
     !(warningListEl instanceof HTMLElement) ||
@@ -556,6 +566,253 @@ const EDITOR_CLIENT_SCRIPT = `(() => {
 
   const setElementText = (element, text) => {
     element.textContent = text;
+  };
+
+  const setToolbarMessage = (message) => {
+    setElementText(toolbarMessageEl, message);
+    toolbarMessageEl.hidden = false;
+  };
+
+  const clearToolbarMessage = () => {
+    toolbarMessageEl.hidden = true;
+    clearElementText(toolbarMessageEl);
+  };
+
+  const isAllowedLinkUrl = (value) => {
+    const rawValue = value.trim();
+    if (rawValue.length === 0) {
+      return false;
+    }
+
+    const lowered = rawValue.toLowerCase();
+    if (lowered.startsWith("javascript:") || lowered.startsWith("data:")) {
+      return false;
+    }
+
+    try {
+      const parsed = new URL(rawValue);
+      return ALLOWED_LINK_PROTOCOLS.has(parsed.protocol.toLowerCase());
+    } catch {
+      return false;
+    }
+  };
+
+  const getSelectionState = () => ({
+    value: bodyInputEl.value,
+    start: bodyInputEl.selectionStart,
+    end: bodyInputEl.selectionEnd
+  });
+
+  const applyBodyMutation = (nextValue, selectionStart, selectionEnd) => {
+    bodyInputEl.value = nextValue;
+    bodyInputEl.focus();
+    bodyInputEl.setSelectionRange(selectionStart, selectionEnd);
+    bodyInputEl.dispatchEvent(new Event("input", { bubbles: true }));
+  };
+
+  const toggleWrappedSelection = (prefix, suffix, placeholder) => {
+    const { value, start, end } = getSelectionState();
+    const selectedText = value.slice(start, end);
+
+    if (selectedText.length > 0 && selectedText.startsWith(prefix) && selectedText.endsWith(suffix)) {
+      const unwrappedText = selectedText.slice(prefix.length, selectedText.length - suffix.length);
+      const nextValue = value.slice(0, start) + unwrappedText + value.slice(end);
+      applyBodyMutation(nextValue, start, start + unwrappedText.length);
+      return;
+    }
+
+    const innerText = selectedText.length > 0 ? selectedText : placeholder;
+    const wrappedText = prefix + innerText + suffix;
+    const nextValue = value.slice(0, start) + wrappedText + value.slice(end);
+    const nextStart = start + prefix.length;
+    applyBodyMutation(nextValue, nextStart, nextStart + innerText.length);
+  };
+
+  const getSelectedLineRange = (value, start, end) => {
+    const lineStart = value.lastIndexOf("\\n", Math.max(0, start - 1)) + 1;
+    const lineEndIndex = value.indexOf("\\n", end);
+    const lineEnd = lineEndIndex === -1 ? value.length : lineEndIndex;
+    return { lineStart, lineEnd };
+  };
+
+  const toggleLinePrefix = (prefix, placeholder) => {
+    const { value, start, end } = getSelectionState();
+
+    if (start === end) {
+      const insertText = prefix + placeholder;
+      const nextValue = value.slice(0, start) + insertText + value.slice(end);
+      const nextSelectionStart = start + prefix.length;
+      applyBodyMutation(nextValue, nextSelectionStart, nextSelectionStart + placeholder.length);
+      return;
+    }
+
+    const { lineStart, lineEnd } = getSelectedLineRange(value, start, end);
+    const selectedBlock = value.slice(lineStart, lineEnd);
+    const lines = selectedBlock.split("\\n");
+    const nonEmptyLines = lines.filter((line) => line.trim().length > 0);
+    const shouldUnprefix = nonEmptyLines.length > 0 && nonEmptyLines.every((line) => line.startsWith(prefix));
+
+    const nextLines = lines.map((line) => {
+      if (line.trim().length === 0) {
+        return line;
+      }
+
+      if (shouldUnprefix && line.startsWith(prefix)) {
+        return line.slice(prefix.length);
+      }
+
+      return prefix + line;
+    });
+
+    const nextBlock = nextLines.join("\\n");
+    const nextValue = value.slice(0, lineStart) + nextBlock + value.slice(lineEnd);
+    applyBodyMutation(nextValue, lineStart, lineStart + nextBlock.length);
+  };
+
+  const applyNumberedList = () => {
+    const { value, start, end } = getSelectionState();
+
+    if (start === end) {
+      const template = "1. First item\\n2. Second item";
+      const nextValue = value.slice(0, start) + template + value.slice(end);
+      const firstItemStart = start + "1. ".length;
+      applyBodyMutation(nextValue, firstItemStart, firstItemStart + "First item".length);
+      return;
+    }
+
+    const { lineStart, lineEnd } = getSelectedLineRange(value, start, end);
+    const selectedBlock = value.slice(lineStart, lineEnd);
+    const lines = selectedBlock.split("\\n");
+    let index = 1;
+
+    const nextLines = lines.map((line) => {
+      if (line.trim().length === 0) {
+        return line;
+      }
+
+      const cleaned = line.replace(/^\\d+\\.\\s+/, "");
+      const numberedLine = String(index) + ". " + cleaned;
+      index += 1;
+      return numberedLine;
+    });
+
+    const nextBlock = nextLines.join("\\n");
+    const nextValue = value.slice(0, lineStart) + nextBlock + value.slice(lineEnd);
+    applyBodyMutation(nextValue, lineStart, lineStart + nextBlock.length);
+  };
+
+  const applyCodeBlock = () => {
+    const { value, start, end } = getSelectionState();
+    const selectedText = value.slice(start, end);
+    const fence = "\`\`\`";
+    const innerText = selectedText.length > 0 ? selectedText : "code";
+    const block = fence + "\\n" + innerText + "\\n" + fence;
+    const nextValue = value.slice(0, start) + block + value.slice(end);
+    const nextStart = start + fence.length + 1;
+    applyBodyMutation(nextValue, nextStart, nextStart + innerText.length);
+  };
+
+  const insertHorizontalRule = () => {
+    const { value, start, end } = getSelectionState();
+    const beforeNeedsBreak = start > 0 && value[start - 1] !== "\\n";
+    const afterNeedsBreak = end < value.length && value[end] !== "\\n";
+    const hrText = (beforeNeedsBreak ? "\\n" : "") + "\\n---\\n" + (afterNeedsBreak ? "\\n" : "");
+    const nextValue = value.slice(0, start) + hrText + value.slice(end);
+    const cursorPosition = start + hrText.length;
+    applyBodyMutation(nextValue, cursorPosition, cursorPosition);
+  };
+
+  const insertMarkdownLink = () => {
+    const { value, start, end } = getSelectionState();
+    const selectedText = value.slice(start, end);
+    const requestedUrl = window.prompt("Enter URL (http://, https://, or mailto:)", "https://");
+
+    if (requestedUrl === null) {
+      return;
+    }
+
+    const url = requestedUrl.trim();
+    if (!isAllowedLinkUrl(url)) {
+      setToolbarMessage("Invalid URL. Only http://, https://, and mailto: links are allowed.");
+      return;
+    }
+
+    clearToolbarMessage();
+    const linkText = selectedText.length > 0 ? selectedText : "link text";
+    const markdown = "[" + linkText + "](" + url + ")";
+    const nextValue = value.slice(0, start) + markdown + value.slice(end);
+    const textSelectionStart = start + 1;
+    applyBodyMutation(nextValue, textSelectionStart, textSelectionStart + linkText.length);
+  };
+
+  const applyToolbarAction = (format) => {
+    if (bodyInputEl.disabled) {
+      return;
+    }
+
+    if (format === "bold") {
+      clearToolbarMessage();
+      toggleWrappedSelection("**", "**", "bold text");
+      return;
+    }
+
+    if (format === "italic") {
+      clearToolbarMessage();
+      toggleWrappedSelection("*", "*", "italic text");
+      return;
+    }
+
+    if (format === "heading") {
+      clearToolbarMessage();
+      toggleLinePrefix("## ", "Heading");
+      return;
+    }
+
+    if (format === "link") {
+      insertMarkdownLink();
+      return;
+    }
+
+    if (format === "bulleted-list") {
+      clearToolbarMessage();
+      toggleLinePrefix("- ", "List item");
+      return;
+    }
+
+    if (format === "numbered-list") {
+      clearToolbarMessage();
+      applyNumberedList();
+      return;
+    }
+
+    if (format === "quote") {
+      clearToolbarMessage();
+      toggleLinePrefix("> ", "Quoted text");
+      return;
+    }
+
+    if (format === "code-block") {
+      clearToolbarMessage();
+      applyCodeBlock();
+      return;
+    }
+
+    if (format === "inline-code") {
+      clearToolbarMessage();
+      toggleWrappedSelection("\`", "\`", "code");
+      return;
+    }
+
+    if (format === "horizontal-rule") {
+      clearToolbarMessage();
+      insertHorizontalRule();
+    }
+  };
+
+  const toggleFormattingHelp = () => {
+    const isOpening = toolbarHelpEl.hidden;
+    toolbarHelpEl.hidden = !isOpening;
+    toolbarHelpToggleEl.setAttribute("aria-expanded", String(isOpening));
   };
 
   const normalizeSlugInput = (value) => value.trim().toLowerCase();
@@ -1388,11 +1645,55 @@ const EDITOR_CLIENT_SCRIPT = `(() => {
   });
 
   bodyInputEl.addEventListener("input", () => {
+    clearToolbarMessage();
     applyWarnings();
     schedulePreview();
     clearElementText(bodyErrorEl);
     clearValidationSummary();
     syncDirtyState();
+  });
+
+  toolbarEl.addEventListener("click", (event) => {
+    const target = event.target instanceof Element ? event.target.closest("button[data-md-format]") : null;
+    if (!(target instanceof HTMLButtonElement)) {
+      return;
+    }
+
+    const format = typeof target.dataset.mdFormat === "string" ? target.dataset.mdFormat : "";
+    if (!format) {
+      return;
+    }
+
+    event.preventDefault();
+    applyToolbarAction(format);
+  });
+
+  toolbarHelpToggleEl.addEventListener("click", () => {
+    toggleFormattingHelp();
+  });
+
+  bodyInputEl.addEventListener("keydown", (event) => {
+    if (!(event.metaKey || event.ctrlKey) || event.altKey) {
+      return;
+    }
+
+    const lowerKey = event.key.toLowerCase();
+    if (lowerKey === "b") {
+      event.preventDefault();
+      applyToolbarAction("bold");
+      return;
+    }
+
+    if (lowerKey === "i") {
+      event.preventDefault();
+      applyToolbarAction("italic");
+      return;
+    }
+
+    if (lowerKey === "k") {
+      event.preventDefault();
+      applyToolbarAction("link");
+    }
   });
 
   slugSuggestionButtonEl.addEventListener("click", () => {
@@ -1472,6 +1773,7 @@ const EDITOR_CLIENT_SCRIPT = `(() => {
 
   hideSlugSuggestion();
   clearValidationSummary();
+  clearToolbarMessage();
   applyWarnings();
   setStatusPill();
   updateActionButtons();
@@ -1787,6 +2089,127 @@ function renderEditorPage(
             <section class="wn-admin-editor-content__editor">
               <div class="wn-admin-field">
                 <label class="wn-admin-field__label ds-text ds-text--muted" for="whats-new-editor-body">Body markdown</label>
+                <div class="wn-md-toolbar-wrap">
+                  <div id="whats-new-editor-md-toolbar" class="wn-md-toolbar" role="toolbar" aria-label="Markdown formatting">
+                    <button
+                      type="button"
+                      class="ds-button ds-button--ghost wn-md-toolbar__button"
+                      data-md-format="bold"
+                      title="Bold: **text** (Cmd/Ctrl+B)"
+                      aria-label="Bold"
+                    >
+                      Bold
+                    </button>
+                    <button
+                      type="button"
+                      class="ds-button ds-button--ghost wn-md-toolbar__button"
+                      data-md-format="italic"
+                      title="Italic: *text* (Cmd/Ctrl+I)"
+                      aria-label="Italic"
+                    >
+                      Italic
+                    </button>
+                    <button
+                      type="button"
+                      class="ds-button ds-button--ghost wn-md-toolbar__button"
+                      data-md-format="heading"
+                      title="Heading: ## Heading"
+                      aria-label="Heading"
+                    >
+                      Heading
+                    </button>
+                    <button
+                      type="button"
+                      class="ds-button ds-button--ghost wn-md-toolbar__button"
+                      data-md-format="link"
+                      title="Link: [label](https://example.com) (Cmd/Ctrl+K)"
+                      aria-label="Insert link"
+                    >
+                      Link
+                    </button>
+                    <button
+                      type="button"
+                      class="ds-button ds-button--ghost wn-md-toolbar__button"
+                      data-md-format="bulleted-list"
+                      title="Bulleted list: - Item"
+                      aria-label="Bulleted list"
+                    >
+                      Bulleted list
+                    </button>
+                    <button
+                      type="button"
+                      class="ds-button ds-button--ghost wn-md-toolbar__button"
+                      data-md-format="numbered-list"
+                      title="Numbered list: 1. Item"
+                      aria-label="Numbered list"
+                    >
+                      Numbered list
+                    </button>
+                    <button
+                      type="button"
+                      class="ds-button ds-button--ghost wn-md-toolbar__button"
+                      data-md-format="quote"
+                      title="Quote: > Text"
+                      aria-label="Quote"
+                    >
+                      Quote
+                    </button>
+                    <button
+                      type="button"
+                      class="ds-button ds-button--ghost wn-md-toolbar__button"
+                      data-md-format="code-block"
+                      title="Code block: fenced with triple backticks"
+                      aria-label="Code block"
+                    >
+                      Code block
+                    </button>
+                    <button
+                      type="button"
+                      class="ds-button ds-button--ghost wn-md-toolbar__button"
+                      data-md-format="inline-code"
+                      title="Inline code: wrap text in single backticks"
+                      aria-label="Inline code"
+                    >
+                      Inline code
+                    </button>
+                    <button
+                      type="button"
+                      class="ds-button ds-button--ghost wn-md-toolbar__button"
+                      data-md-format="horizontal-rule"
+                      title="Horizontal rule: ---"
+                      aria-label="Horizontal rule"
+                    >
+                      Rule
+                    </button>
+                    <span class="wn-md-toolbar__spacer" aria-hidden="true"></span>
+                    <button
+                      id="whats-new-editor-md-help-toggle"
+                      type="button"
+                      class="ds-button ds-button--ghost wn-md-toolbar__help-link"
+                      aria-expanded="false"
+                      aria-controls="whats-new-editor-md-help"
+                    >
+                      Formatting help
+                    </button>
+                  </div>
+                  <p
+                    id="whats-new-editor-toolbar-message"
+                    class="wn-md-toolbar-message ds-text ds-text--muted"
+                    role="status"
+                    aria-live="polite"
+                    hidden
+                  ></p>
+                  <section id="whats-new-editor-md-help" class="wn-md-help ds-surface ds-surface--sunken" hidden>
+                    <p class="ds-text ds-text--body">Quick markdown examples</p>
+                    <ul class="wn-md-help-list">
+                      <li class="ds-text ds-text--muted"><strong>Heading:</strong> <code>## Release heading</code></li>
+                      <li class="ds-text ds-text--muted"><strong>Bold:</strong> <code>**important text**</code></li>
+                      <li class="ds-text ds-text--muted"><strong>Link:</strong> <code>[View details](https://example.com)</code></li>
+                      <li class="ds-text ds-text--muted"><strong>List:</strong> <code>- First item</code></li>
+                      <li class="ds-text ds-text--muted"><strong>Code:</strong> <code>\`\`\`\\nconst value = 1;\\n\`\`\`</code></li>
+                    </ul>
+                  </section>
+                </div>
                 <textarea
                   id="whats-new-editor-body"
                   class="wn-admin-textarea"
