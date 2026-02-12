@@ -26,6 +26,14 @@ describe("GET /whats-new", () => {
     expect(response.header.location).toBe("/whats-new");
   });
 
+  it("preserves deep-link query params when redirecting root path", async () => {
+    const app = createApp(config);
+    const response = await request(app).get("/?whats_new=1");
+
+    expect(response.status).toBe(302);
+    expect(response.header.location).toBe("/whats-new?whats_new=1");
+  });
+
   it("serves route for allowlisted admin", async () => {
     const app = createApp(config);
     const response = await request(app)
@@ -63,6 +71,18 @@ describe("GET /whats-new", () => {
       .set("x-tenant-id", "tenant-beta");
 
     expect(response.status).toBe(404);
+  });
+
+  it("keeps deep-link trigger gated for non-allowlisted tenants without leaking reason", async () => {
+    const app = createApp(config);
+    const response = await request(app)
+      .get("/whats-new?whats_new=1")
+      .set("x-user-id", "admin-1")
+      .set("x-user-role", "ADMIN")
+      .set("x-tenant-id", "tenant-beta");
+
+    expect(response.status).toBe(404);
+    expect(response.body).toEqual({ error: "Not found" });
   });
 
   it("supports browser access without headers when dev auth fallback is enabled", async () => {
@@ -154,6 +174,7 @@ describe("GET /whats-new", () => {
 
     expect(response.status).toBe(200);
     expect(response.text).toContain('id="whats-new-entry-link"');
+    expect(response.text).toContain('href="/whats-new/global-update?whats_new=1"');
     expect(response.text).toContain('aria-controls="whats-new-panel"');
     expect(response.text).toContain('aria-expanded="false"');
     expect(response.text).toContain('id="whats-new-unread-dot" class="wn-nav-badge-dot"');
@@ -307,11 +328,23 @@ describe("GET /whats-new", () => {
 
     expect(response.status).toBe(200);
     expect(response.text).toContain("MARK_SEEN_DEBOUNCE_MS = 60_000");
+    expect(response.text).toContain('const DEEPLINK_QUERY_PARAM = "whats_new"');
+    expect(response.text).toContain('const DEEPLINK_QUERY_VALUE = "1"');
+    expect(response.text).toContain('const DEEPLINK_HASH = "#whats-new"');
     expect(response.text).toContain("lastSeenWriteAtMs > 0");
     expect(response.text).toContain("const refreshedHasUnread = await refreshUnreadIndicator();");
     expect(response.text).toContain("/api/whats-new/seen");
     expect(response.text).toContain('"x-csrf-token"');
     expect(response.text).toContain('trackEvent("whats_new.open_panel"');
+    expect(response.text).toContain('source: normalizePanelOpenSource(source)');
+    expect(response.text).toContain("let initialTriggerConsumed = false;");
+    expect(response.text).toContain("const processInitialTrigger = async () => {");
+    expect(response.text).toContain('const opened = openPanel("deeplink");');
+    expect(response.text).toContain('const payload = await requestJson("/api/whats-new/posts?limit=1");');
+    expect(response.text).toContain("window.location.assign(targetUrl);");
+    expect(response.text).toContain("if (initialTriggerConsumed) {");
+    expect(response.text).toContain("window.history.replaceState");
+    expect(response.text).toContain('window[PROGRAMMATIC_API_GLOBAL] = programmaticApi;');
     expect((response.text.match(/trackEvent\("whats_new\.open_panel"/g) || []).length).toBe(1);
     expect(response.text).toContain('trackEvent("whats_new.load_more"');
     expect(response.text).toContain('trackEvent("whats_new.open_full_page"');

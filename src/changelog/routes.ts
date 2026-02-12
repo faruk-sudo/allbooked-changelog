@@ -11,6 +11,13 @@ import { getGuardedWhatsNewContext } from "./authz";
 import { applyWhatsNewReadGuards } from "./guards";
 import { sanitizeSlugOrThrow, type ChangelogPostCategory, type ChangelogRepository } from "./repository";
 import type { WhatsNewRequestContext } from "./request-context";
+import {
+  WHATS_NEW_DEEPLINK_HASH,
+  WHATS_NEW_DEEPLINK_QUERY_PARAM,
+  WHATS_NEW_DEEPLINK_QUERY_VALUE,
+  WHATS_NEW_PROGRAMMATIC_API_GLOBAL,
+  buildWhatsNewDeepLinkHref
+} from "./trigger-contract";
 
 const STYLESHEET = [
   readFileSync(resolve(__dirname, "../../src/styles/tokens.css"), "utf8"),
@@ -34,6 +41,10 @@ const CLIENT_SCRIPT = `(() => {
   const MARK_SEEN_DEBOUNCE_MS = 60_000;
   const OPEN_POST_SOURCE_STORAGE_KEY = "whats_new_open_post_source_v1";
   const OPEN_POST_SOURCE_TTL_MS = 120_000;
+  const DEEPLINK_QUERY_PARAM = ${JSON.stringify(WHATS_NEW_DEEPLINK_QUERY_PARAM)};
+  const DEEPLINK_QUERY_VALUE = ${JSON.stringify(WHATS_NEW_DEEPLINK_QUERY_VALUE)};
+  const DEEPLINK_HASH = ${JSON.stringify(`#${WHATS_NEW_DEEPLINK_HASH}`)};
+  const PROGRAMMATIC_API_GLOBAL = ${JSON.stringify(WHATS_NEW_PROGRAMMATIC_API_GLOBAL)};
   const FOCUSABLE_SELECTOR =
     'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
@@ -83,6 +94,7 @@ const CLIENT_SCRIPT = `(() => {
   let lastSeenWriteAtMs = 0;
   let markSeenPromise = null;
   let markSeenInFlightSurface = null;
+  let initialTriggerConsumed = false;
 
   const isRecord = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
 
@@ -269,6 +281,88 @@ const CLIENT_SCRIPT = `(() => {
   };
 
   const getFeedSurface = () => (currentView === "list" ? "page" : "panel");
+
+  const normalizePanelOpenSource = (value) => {
+    if (value === "deeplink") {
+      return "deeplink";
+    }
+
+    if (value === "programmatic") {
+      return "programmatic";
+    }
+
+    return "manual";
+  };
+
+  const hasDeepLinkQueryTrigger = () => {
+    try {
+      const values = new URLSearchParams(window.location.search).getAll(DEEPLINK_QUERY_PARAM);
+      return values.some((value) => normalizeString(value) === DEEPLINK_QUERY_VALUE);
+    } catch {
+      return false;
+    }
+  };
+
+  const hasDeepLinkHashTrigger = () => {
+    const rawHash = typeof window.location.hash === "string" ? window.location.hash : "";
+    return rawHash.trim().toLowerCase() === DEEPLINK_HASH;
+  };
+
+  const cleanupDeepLinkLocation = () => {
+    if (!window.history || typeof window.history.replaceState !== "function") {
+      return;
+    }
+
+    try {
+      const locationUrl = new URL(window.location.href);
+      const hasQueryTrigger = locationUrl.searchParams
+        .getAll(DEEPLINK_QUERY_PARAM)
+        .some((value) => normalizeString(value) === DEEPLINK_QUERY_VALUE);
+
+      if (hasQueryTrigger) {
+        locationUrl.searchParams.delete(DEEPLINK_QUERY_PARAM);
+      }
+
+      const hasHashTrigger = locationUrl.hash.trim().toLowerCase() === DEEPLINK_HASH;
+      if (hasHashTrigger) {
+        locationUrl.hash = "";
+      }
+
+      if (!hasQueryTrigger && !hasHashTrigger) {
+        return;
+      }
+
+      const nextSearch = locationUrl.searchParams.toString();
+      const nextUrl = locationUrl.pathname + (nextSearch.length > 0 ? "?" + nextSearch : "") + locationUrl.hash;
+      window.history.replaceState(window.history.state, "", nextUrl || locationUrl.pathname);
+    } catch {
+      // Ignore replaceState failures.
+    }
+  };
+
+  const redirectDeepLinkToPanelSurface = async () => {
+    if (currentView !== "list") {
+      return false;
+    }
+
+    try {
+      const payload = await requestJson("/api/whats-new/posts?limit=1");
+      const firstPost = Array.isArray(payload.items) ? payload.items[0] : null;
+      const firstSlug = firstPost && typeof firstPost.slug === "string" ? firstPost.slug.trim() : "";
+      if (!firstSlug) {
+        return false;
+      }
+
+      const targetPath = detailBasePath + encodeURIComponent(firstSlug);
+      const targetSearch = new URLSearchParams();
+      targetSearch.set(DEEPLINK_QUERY_PARAM, DEEPLINK_QUERY_VALUE);
+      const targetUrl = targetPath + "?" + targetSearch.toString();
+      window.location.assign(targetUrl);
+      return true;
+    } catch {
+      return false;
+    }
+  };
 
   const rememberOpenPostSource = (sourceSurface, postId, slug) => {
     const normalizedSlug = normalizeString(slug);
@@ -724,9 +818,9 @@ const CLIENT_SCRIPT = `(() => {
     panelTriggerEl = null;
   };
 
-  const openPanel = () => {
+  const openPanel = (source = "manual") => {
     if (!panelEl || !overlayEl || panelEl.hidden === false) {
-      return;
+      return false;
     }
 
     if (document.activeElement instanceof HTMLElement) {
@@ -747,7 +841,8 @@ const CLIENT_SCRIPT = `(() => {
     focusInitialPanelTarget();
 
     trackEvent("whats_new.open_panel", {
-      surface: "panel"
+      surface: "panel",
+      source: normalizePanelOpenSource(source)
     });
 
     if (!feedState.hasLoadedOnce) {
@@ -755,6 +850,7 @@ const CLIENT_SCRIPT = `(() => {
     }
 
     void markSeen("panel");
+    return true;
   };
 
   const onPanelKeydown = (event) => {
@@ -808,7 +904,7 @@ const CLIENT_SCRIPT = `(() => {
       }
       event.preventDefault();
       if (panelEl.hidden) {
-        openPanel();
+        openPanel("manual");
       } else {
         closePanel();
       }
@@ -826,6 +922,51 @@ const CLIENT_SCRIPT = `(() => {
       closePanel();
     });
   }
+
+  const processInitialTrigger = async () => {
+    if (initialTriggerConsumed) {
+      return;
+    }
+
+    initialTriggerConsumed = true;
+    if (!hasDeepLinkQueryTrigger() && !hasDeepLinkHashTrigger()) {
+      return;
+    }
+
+    const opened = openPanel("deeplink");
+    if (opened) {
+      cleanupDeepLinkLocation();
+      return;
+    }
+
+    const redirected = await redirectDeepLinkToPanelSurface();
+    if (!redirected) {
+      cleanupDeepLinkLocation();
+    }
+  };
+
+  const programmaticApi = Object.freeze({
+    version: "v1",
+    open: () => {
+      openPanel("programmatic");
+    },
+    close: () => {
+      closePanel();
+    },
+    toggle: () => {
+      if (!panelEl || !overlayEl) {
+        return;
+      }
+
+      if (panelEl.hidden) {
+        openPanel("programmatic");
+      } else {
+        closePanel();
+      }
+    }
+  });
+
+  window[PROGRAMMATIC_API_GLOBAL] = programmaticApi;
 
   if (loadMoreEl) {
     loadMoreEl.addEventListener("click", () => {
@@ -868,6 +1009,7 @@ const CLIENT_SCRIPT = `(() => {
     }
 
     setUnreadIndicator(hasUnreadState);
+    await processInitialTrigger();
     const unreadRefreshPromise = refreshUnreadIndicator();
     const markSeenOnListPromise = currentView === "list" ? markSeen("page") : Promise.resolve();
     const loadFeedOnListPromise = currentView === "list" ? loadFeedPage("initial") : Promise.resolve();
@@ -884,13 +1026,13 @@ function renderNavBadgeDot(hasUnread: boolean): string {
       <span id="whats-new-unread-text" class="wn-sr-only"${hiddenAttribute}>New updates available</span>`;
 }
 
-function renderBottomBar(hasUnread: boolean): string {
+function renderBottomBar(hasUnread: boolean, entryHref: string = buildWhatsNewDeepLinkHref("/whats-new")): string {
   const ariaLabel = hasUnread ? "What's New. New updates available" : "What's New";
   return `<nav class="wn-bottom-bar" aria-label="App navigation">
       <a
         id="whats-new-entry-link"
         class="ds-button ds-button--ghost wn-bottom-link"
-        href="/whats-new"
+        href="${escapeHtml(entryHref)}"
         aria-controls="whats-new-panel"
         aria-haspopup="dialog"
         aria-expanded="false"
@@ -1077,7 +1219,7 @@ function renderDetailPage(context: WhatsNewRequestContext, post: DetailPagePost,
       </article>
     </main>
     ${renderWhatsNewPanel()}
-    ${renderBottomBar(hasUnread)}
+    ${renderBottomBar(hasUnread, buildWhatsNewDeepLinkHref(`/whats-new/${encodeURIComponent(post.slug)}`))}
     <div
       id="whats-new-app"
       data-view="detail"

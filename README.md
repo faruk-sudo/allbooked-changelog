@@ -4,7 +4,7 @@ Secure foundation for AllBooked's in-app admin-only "What's New" (changelog) fea
 
 ## Why this exists
 - v1 scope: authenticated admin users only.
-- Entry point: app footer/bottom bar link to `/whats-new`.
+- Entry point: app footer/bottom bar link to `/whats-new` with deep-link trigger support (`?whats_new=1`).
 - Rollout safety: tenant allowlist and kill switch are enforced server-side.
 
 ## Stack
@@ -32,6 +32,7 @@ npm run dev
 - Health: `http://localhost:3000/healthz`
 - What's New: `http://localhost:3000/whats-new`
 - What's New detail: `http://localhost:3000/whats-new/:slug`
+- What's New drawer deep link (panel trigger): `http://localhost:3000/whats-new/:slug?whats_new=1`
 - Public changelog list (disabled by default): `http://localhost:3000/changelog`
 - Public changelog detail: `http://localhost:3000/changelog/:slug`
 - Public changelog RSS feed (disabled by default): `http://localhost:3000/rss`
@@ -212,6 +213,15 @@ Admin API (admin + allowlisted tenant + publisher allowlist + CSRF token for mut
 - `PUT /api/admin/whats-new/posts/:id`
 - `POST /api/admin/whats-new/posts/:id/publish`
 - `POST /api/admin/whats-new/posts/:id/unpublish`
+
+## Trigger contract
+- Deep-link formats:
+  - canonical query param: `?whats_new=1`
+  - hash alias: `#whats-new`
+- Programmatic API: `window.AllBookedWhatsNew.open()`, `.close()`, `.toggle()` (v1 contract).
+- Full-page fallback: deep-link hits on `/whats-new` redirect to the latest detail route so the drawer can open.
+- Security posture: triggers reuse existing guarded reader UI behavior and remain no-op/blocked when the feature is unavailable.
+- Details: `docs/whats-new-triggers.md`
 
 ## API rate limiting and cache behavior
 - Scope key: per `(tenant_id, user_id)` when available, otherwise by IP fallback.

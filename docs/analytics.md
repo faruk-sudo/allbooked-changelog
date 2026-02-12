@@ -35,6 +35,7 @@ Event-specific properties:
 
 - `result`: `"success"` or `"failure"` for mark-seen events
 - `error_code`: short code only for mark-seen failure
+- `source`: `"manual" | "deeplink" | "programmatic"` for `whats_new.open_panel`
 - `pagination`:
   - `limit`: number
   - `cursor_present`: boolean
@@ -55,7 +56,7 @@ The tracker strips unknown keys and disallowed keys defensively before sending.
 
 ## Event meanings
 
-- `whats_new.open_panel`: user opens the drawer panel.
+- `whats_new.open_panel`: drawer panel opens (manual click, deep-link trigger, or programmatic API).
 - `whats_new.open_full_page`: `/whats-new` full page mounted.
 - `whats_new.open_post`: user opens a post detail (`/whats-new/:slug`).
 - `whats_new.mark_seen_success`: `/api/whats-new/seen` succeeded.

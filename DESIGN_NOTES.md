@@ -550,3 +550,29 @@ SELECT EXISTS (
    - strict leakage prevention (private/draft/tenant-scoped posts excluded)
    - limit cap (`max 50`)
    - sanitization regressions (`<script`, `onerror=`, `javascript:` absent)
+
+## Phase 5D (5.2 external trigger) deep-link + programmatic panel open
+
+### Decisions
+
+1. Added a shared trigger contract module (`src/changelog/trigger-contract.ts`) as the single source of truth for:
+   - deep-link query/hash constants (`?whats_new=1`, `#whats-new`)
+   - trigger source contract (`manual`, `deeplink`, `programmatic`)
+   - URL trigger parse/cleanup helpers and stable deep-link href generation
+2. Kept query-param deep links canonical and added hash support as a compatibility alias:
+   - query/hash are interpreted client-side from current location
+   - trigger is consumed once per page load (`initialTriggerConsumed`)
+   - successful deep-link open cleans URL via `history.replaceState` (no full reload)
+   - when a deep-link lands on `/whats-new` (full-page list without drawer shell), the client redirects once to the latest detail route (`/whats-new/:slug?whats_new=1`) so panel-open semantics remain consistent
+3. Reused existing panel-open behavior for deep-link and programmatic triggers:
+   - same `openPanel` path as manual click
+   - same mark-seen behavior (`POST /api/whats-new/seen`)
+   - same `whats_new.open_panel` instrumentation event
+4. Extended analytics schema safely by allowing optional `source` on `whats_new.open_panel`:
+   - enum-constrained to `manual | deeplink | programmatic`
+   - existing required fields unchanged (`surface` remains required)
+5. Added a minimal global API for controlled integrations:
+   - `window.AllBookedWhatsNew = { version: "v1", open, close, toggle }`
+   - no internal gating state/details are exposed
+   - methods are safe no-ops when panel surface is unavailable
+6. Updated the bottom-bar entry link to use the deep-link contract (`?whats_new=1`) so new-tab opens process and trigger panel-open once on first load.

@@ -14,6 +14,8 @@ export type WhatsNewAnalyticsSurface = (typeof WHATS_NEW_ANALYTICS_SURFACES)[num
 
 export const WHATS_NEW_ANALYTICS_RESULTS = ["success", "failure"] as const;
 export type WhatsNewAnalyticsResult = (typeof WHATS_NEW_ANALYTICS_RESULTS)[number];
+export const WHATS_NEW_ANALYTICS_TRIGGER_SOURCES = ["manual", "deeplink", "programmatic"] as const;
+export type WhatsNewAnalyticsTriggerSource = (typeof WHATS_NEW_ANALYTICS_TRIGGER_SOURCES)[number];
 
 export const WHATS_NEW_ANALYTICS_PROPERTY_SCHEMA = {
   surface: {
@@ -35,6 +37,10 @@ export const WHATS_NEW_ANALYTICS_PROPERTY_SCHEMA = {
   result: {
     type: "string",
     enum_values: WHATS_NEW_ANALYTICS_RESULTS
+  },
+  source: {
+    type: "string",
+    enum_values: WHATS_NEW_ANALYTICS_TRIGGER_SOURCES
   },
   error_code: {
     type: "string"
@@ -63,7 +69,7 @@ export const WHATS_NEW_EVENT_PROPERTY_ALLOWLIST: Record<
   WhatsNewEventName,
   readonly WhatsNewAnalyticsPropertyKey[]
 > = {
-  "whats_new.open_panel": ["surface", "tenant_id", "user_id"],
+  "whats_new.open_panel": ["surface", "source", "tenant_id", "user_id"],
   "whats_new.open_full_page": ["surface", "tenant_id", "user_id"],
   "whats_new.open_post": ["surface", "tenant_id", "user_id", "post_id", "slug"],
   "whats_new.mark_seen_success": ["surface", "tenant_id", "user_id", "result"],
@@ -119,4 +125,3 @@ export const WHATS_NEW_ANALYTICS_TAXONOMY = {
   forbidden_property_keys: WHATS_NEW_FORBIDDEN_PROPERTY_KEYS,
   forbidden_property_key_pattern: WHATS_NEW_FORBIDDEN_PROPERTY_KEY_PATTERN.source
 } as const;
-

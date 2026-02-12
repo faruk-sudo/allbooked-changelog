@@ -57,4 +57,40 @@ describe("analytics tracker", () => {
     expect(code).toBe("unknown_error");
     expect(code).not.toContain("postgres://");
   });
+
+  it("keeps open-panel source constrained to allowed trigger values", () => {
+    const trackedEvents: Array<{ name: WhatsNewEventName; properties: Record<string, unknown> }> = [];
+    const tracker = createAnalyticsTracker({
+      track: (name, properties) => {
+        trackedEvents.push({ name, properties });
+      }
+    });
+
+    tracker.trackEvent("whats_new.open_panel", {
+      surface: "panel",
+      source: "deeplink",
+      tenant_id: "sha256:tenant",
+      user_id: "admin-1"
+    });
+
+    tracker.trackEvent("whats_new.open_panel", {
+      surface: "panel",
+      source: "not-allowed",
+      tenant_id: "sha256:tenant",
+      user_id: "admin-1"
+    });
+
+    expect(trackedEvents).toHaveLength(2);
+    expect(trackedEvents[0]?.properties).toEqual({
+      surface: "panel",
+      source: "deeplink",
+      tenant_id: "sha256:tenant",
+      user_id: "admin-1"
+    });
+    expect(trackedEvents[1]?.properties).toEqual({
+      surface: "panel",
+      tenant_id: "sha256:tenant",
+      user_id: "admin-1"
+    });
+  });
 });

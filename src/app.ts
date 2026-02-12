@@ -68,8 +68,10 @@ export function createApp(config: AppConfig, dependencies: AppDependencies = {})
     }
   });
 
-  app.get("/", (_req, res) => {
-    res.redirect(302, "/whats-new");
+  app.get("/", (req, res) => {
+    const queryIndex = req.originalUrl.indexOf("?");
+    const querySuffix = queryIndex >= 0 ? req.originalUrl.slice(queryIndex) : "";
+    res.redirect(302, `/whats-new${querySuffix}`);
   });
 
   app.use("/api/whats-new", createWhatsNewApiRouter(config, changelogRepository, logger, rateLimitStore));
