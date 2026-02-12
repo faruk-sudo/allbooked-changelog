@@ -1667,8 +1667,8 @@ function renderEditorPage(
         <p id="whats-new-editor-banner" class="wn-admin-editor-banner ds-text" hidden></p>
 
         <form id="whats-new-editor-form" class="wn-admin-editor-form">
-          <div class="wn-admin-editor-layout">
-            <section class="wn-admin-editor-main">
+          <div class="wn-admin-editor-basics">
+            <section class="wn-admin-editor-basics__main">
               <div class="wn-admin-field">
                 <label class="wn-admin-field__label ds-text ds-text--muted" for="whats-new-editor-title">Title</label>
                 <input
@@ -1709,32 +1709,9 @@ function renderEditorPage(
                   Use suggestion
                 </button>
               </div>
-
-              <div class="wn-admin-editor-body-layout">
-                <div class="wn-admin-field">
-                  <label class="wn-admin-field__label ds-text ds-text--muted" for="whats-new-editor-body">Body markdown</label>
-                  <textarea
-                    id="whats-new-editor-body"
-                    class="wn-admin-textarea"
-                    name="body_markdown"
-                    rows="18"
-                    placeholder="Write in markdown..."
-                  ></textarea>
-                  <p class="wn-admin-inline-hint ds-text ds-text--muted">Required for publishing.</p>
-                  <p id="whats-new-editor-body-error" class="wn-admin-inline-error ds-text" aria-live="polite"></p>
-                </div>
-
-                <section class="wn-admin-editor-preview-pane ds-surface ds-surface--sunken" aria-label="Preview">
-                  <div class="wn-admin-editor-preview-header">
-                    <h3 class="ds-text ds-text--body">Preview</h3>
-                    <p id="whats-new-editor-preview-status" class="ds-text ds-text--muted" aria-live="polite">Rendering preview...</p>
-                  </div>
-                  <div id="whats-new-editor-preview" class="wn-admin-editor-preview-body"></div>
-                </section>
-              </div>
             </section>
 
-            <aside class="wn-admin-editor-sidebar ds-surface ds-surface--sunken" aria-label="Draft metadata">
+            <aside class="wn-admin-editor-basics__sidebar wn-admin-editor-sidebar ds-surface ds-surface--sunken" aria-label="Draft metadata">
               <div class="wn-admin-field">
                 <label class="wn-admin-field__label ds-text ds-text--muted" for="whats-new-editor-category">Category</label>
                 <select id="whats-new-editor-category" class="wn-admin-select" name="category" required>
@@ -1804,6 +1781,31 @@ function renderEditorPage(
               </section>
               <ul id="whats-new-editor-warning-list" class="wn-admin-editor-warning-list" hidden></ul>
             </aside>
+          </div>
+
+          <div class="wn-admin-editor-content">
+            <section class="wn-admin-editor-content__editor">
+              <div class="wn-admin-field">
+                <label class="wn-admin-field__label ds-text ds-text--muted" for="whats-new-editor-body">Body markdown</label>
+                <textarea
+                  id="whats-new-editor-body"
+                  class="wn-admin-textarea"
+                  name="body_markdown"
+                  rows="18"
+                  placeholder="Write in markdown..."
+                ></textarea>
+                <p class="wn-admin-inline-hint ds-text ds-text--muted">Required for publishing.</p>
+                <p id="whats-new-editor-body-error" class="wn-admin-inline-error ds-text" aria-live="polite"></p>
+              </div>
+            </section>
+
+            <section class="wn-admin-editor-content__preview wn-admin-editor-preview-pane ds-surface ds-surface--sunken" aria-label="Preview">
+              <div class="wn-admin-editor-preview-header">
+                <h3 class="ds-text ds-text--body">Preview</h3>
+                <p id="whats-new-editor-preview-status" class="ds-text ds-text--muted" aria-live="polite">Rendering preview...</p>
+              </div>
+              <div id="whats-new-editor-preview" class="wn-admin-editor-preview-body"></div>
+            </section>
           </div>
         </form>
       </section>

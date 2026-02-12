@@ -77,6 +77,33 @@ The repository was empty at implementation time, so no existing UI stack, stylin
 - Kept the existing server-rendered templates and vanilla client scripts for safety; no frontend framework migration was introduced.
 - Used text action buttons (`Edit`, `View`) as the fallback for table actions to avoid introducing new icon dependencies while still fixing alignment and accessibility.
 
+## Draft editor basics/content split (February 12, 2026)
+
+### Rationale
+
+1. Split the draft form into two stacked layout zones to prevent overlap and visual coupling:
+   - `Basics`: title/slug + metadata panel
+   - `Content`: markdown editor + preview
+2. Keep metadata constrained to the basics section so helper/error growth in title/slug never collides with content preview sizing.
+3. Keep all existing IDs and editor client hooks unchanged to avoid JS behavior regressions.
+
+### Breakpoints
+
+1. `> 60rem` (~960px):
+   - basics grid: `minmax(0, 1fr)` + `minmax(22.5rem, 26rem)` (roughly 360-416px metadata rail)
+   - content grid: `minmax(0, 2fr)` + `minmax(0, 1fr)` (editor weighted wider than preview)
+2. `<= 60rem`:
+   - basics stack to one column (main first, metadata second)
+   - content stack to one column (editor first, preview second)
+
+### Tuning guide
+
+1. Sidebar rail width: adjust `.wn-admin-editor-basics { grid-template-columns: ... }`.
+2. Editor/preview width ratio: adjust `.wn-admin-editor-content { grid-template-columns: ... }`.
+3. Desktop pane height/preview scroll behavior: adjust `min-height`/`max-height` clamps on:
+   - `.wn-admin-editor-content__editor .wn-admin-textarea`
+   - `.wn-admin-editor-preview-body`
+
 ## Phase 1.1 DB schema (What's New)
 
 ### Decisions
